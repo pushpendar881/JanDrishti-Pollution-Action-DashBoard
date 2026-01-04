@@ -76,7 +76,6 @@
 
 - **Intelligent chatbot assistant** with contextual responses
 - **AI-driven pollution forecasting** (24-hour, 7-day, 30-day predictions)
-- **Predictive analytics** with 94.2% accuracy
 - **Smart policy recommendations** based on current AQI levels
 - **Contributing factor analysis** (Weather, Traffic, Industrial, Construction)
 - **Automated health suggestions** based on pollution levels
@@ -460,3 +459,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   <p><em>Stay informed, stay safe, breathe better! 🌱</em></p>
 
 </div>
+
