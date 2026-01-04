@@ -14,6 +14,7 @@ interface Alert {
   isRead: boolean
 }
 
+
 export default function AlertsPanel() {
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [filter, setFilter] = useState<string>("all")
