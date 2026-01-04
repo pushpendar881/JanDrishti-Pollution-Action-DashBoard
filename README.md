@@ -394,7 +394,7 @@ module.exports = {
 ### Data Processing & AI
 
 1. **Real-time Data Streaming** - WebSocket connections for live updates
-2. **AI/ML Processing** - Pollution forecasting with 94.2% accuracy
+2. **AI/ML Processing** - Pollution forecasting
 3. **Caching Layer** - Redis for performance optimization
 4. **Data Storage** - Historical analysis and trend tracking
 5. **Notification System** - WhatsApp, SMS, and in-app alerts
@@ -459,4 +459,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   <p><em>Stay informed, stay safe, breathe better! 🌱</em></p>
 
 </div>
+
 
