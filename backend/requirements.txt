@@ -11,3 +11,11 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.12
 httpx==0.27.2
 groq==0.4.1
+pandas
+geopandas
+shapely
+requests
+folium
+rtree
+pyproj
+
