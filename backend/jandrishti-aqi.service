@@ -1,0 +1,17 @@
+[Unit]
+Description=JanDrishti AQI Data Collection Service
+After=network.target redis.service
+
+[Service]
+Type=simple
+User=your_username
+WorkingDirectory=/path/to/JanDrishti-Pollution-Action-DashBoard/backend
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/python3 /path/to/JanDrishti-Pollution-Action-DashBoard/backend/run_server.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/path/to/JanDrishti-Pollution-Action-DashBoard/backend/logs/aqi_service.log
+StandardError=append:/path/to/JanDrishti-Pollution-Action-DashBoard/backend/logs/aqi_service.error.log
+
+[Install]
+WantedBy=multi-user.target

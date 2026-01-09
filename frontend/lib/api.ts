@@ -174,7 +174,37 @@ export const chatAPI = {
 // Alias for backward compatibility
 export const chatService = chatAPI
 
-// Mock AQI service (replace with real API integration)
+// AQI Data Types
+export interface WardData {
+  ward_name: string
+  ward_no: string
+  quadrant: string
+  latitude: number
+  longitude: number
+  is_active?: boolean
+}
+
+export interface DailyAQIData {
+  id: string
+  ward_name: string
+  ward_no: string
+  quadrant: string
+  latitude: number
+  longitude: number
+  date: string
+  avg_aqi: number
+  avg_pm25: number | null
+  avg_pm10: number | null
+  avg_no2: number | null
+  avg_o3: number | null
+  min_aqi: number
+  max_aqi: number
+  hourly_readings_count: number
+  created_at: string
+  updated_at: string
+}
+
+// AQI Service
 export const aqiService = {
   async getCurrentAQI(location: string = 'Central Delhi'): Promise<AQIData> {
     // This would be replaced with real API calls
@@ -192,6 +222,43 @@ export const aqiService = {
       uvIndex: 0,
       location,
       timestamp: new Date().toISOString()
+    }
+  },
+
+  async getWards(): Promise<WardData[]> {
+    try {
+      const response = await api.get('/api/aqi/wards')
+      return response.data
+    } catch (error) {
+      console.error('Error fetching wards:', error)
+      throw error
+    }
+  },
+
+  async getDailyAQIData(params?: {
+    ward_no?: string
+    start_date?: string
+    end_date?: string
+    limit?: number
+  }): Promise<DailyAQIData[]> {
+    try {
+      const response = await api.get('/api/aqi/daily', { params })
+      return response.data
+    } catch (error) {
+      console.error('Error fetching daily AQI data:', error)
+      throw error
+    }
+  },
+
+  async getWardDailyData(ward_no: string, days: number = 30): Promise<DailyAQIData[]> {
+    try {
+      const response = await api.get(`/api/aqi/daily/${ward_no}`, {
+        params: { days }
+      })
+      return response.data
+    } catch (error) {
+      console.error('Error fetching ward daily data:', error)
+      throw error
     }
   },
 

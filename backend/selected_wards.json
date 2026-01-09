@@ -1,0 +1,30 @@
+[
+  {
+    "ward_name": "MODEL TOWN",
+    "ward_no": "72",
+    "latitude": 28.701932831461676,
+    "longitude": 77.19134098824655,
+    "quadrant": "NE"
+  },
+  {
+    "ward_name": "BEGUMPUR",
+    "ward_no": "27",
+    "latitude": 28.76512833850312,
+    "longitude": 77.02254192019423,
+    "quadrant": "NW"
+  },
+  {
+    "ward_name": "HAUZ RANI",
+    "ward_no": "162",
+    "latitude": 28.53324577226953,
+    "longitude": 77.21275944388348,
+    "quadrant": "SE"
+  },
+  {
+    "ward_name": "NANGLI SAKRAVATI",
+    "ward_no": "134",
+    "latitude": 28.580400517761042,
+    "longitude": 76.99407282729521,
+    "quadrant": "SW"
+  }
+]

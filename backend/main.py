@@ -1,20 +1,45 @@
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 import os
 import traceback
+import requests
+import time
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from jose import JWTError, jwt
 from groq import Groq
+from aqi_scheduler import get_scheduler
 
 
 load_dotenv()
 
-app = FastAPI(title="JanDrishti API", version="1.0.0")
+# Lifespan context for scheduler
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start the AQI scheduler
+    try:
+        scheduler = get_scheduler()
+        scheduler.start()
+        print("✓ AQI Scheduler started")
+    except Exception as e:
+        print(f"⚠ Warning: Could not start AQI Scheduler: {e}")
+    
+    yield
+    
+    # Shutdown: Stop the scheduler
+    try:
+        scheduler = get_scheduler()
+        scheduler.shutdown()
+        print("✓ AQI Scheduler stopped")
+    except Exception as e:
+        print(f"⚠ Warning: Error stopping AQI Scheduler: {e}")
+
+app = FastAPI(title="JanDrishti API", version="1.0.0", lifespan=lifespan)
 
 # CORS Configuration
 origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
@@ -96,6 +121,37 @@ class ChatMessageResponse(BaseModel):
     user_message: str
     bot_response: Optional[str]
     created_at: str
+
+# AQI Models
+class StationData(BaseModel):
+    name: str
+    lon: float
+    lat: float
+    aqi: float
+    pm25: Optional[float] = None
+    pm10: Optional[float] = None
+    no2: Optional[float] = None
+    o3: Optional[float] = None
+    updated: Optional[str] = None
+
+class AQIStationsResponse(BaseModel):
+    stations: List[StationData]
+    total_stations: int
+    average_aqi: Optional[float] = None
+
+class AQIFeedResponse(BaseModel):
+    name: str
+    lon: float
+    lat: float
+    aqi: float
+    pm25: Optional[float] = None
+    pm10: Optional[float] = None
+    no2: Optional[float] = None
+    o3: Optional[float] = None
+    so2: Optional[float] = None
+    co: Optional[float] = None
+    updated: Optional[str] = None
+    station: Optional[dict] = None
 
 
 
@@ -449,6 +505,330 @@ async def create_chat_message(
         print(f"Error in create_chat_message: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
+
+# AQI Endpoints
+WAQI_TOKEN = "62fbeb618094ae4ec793918f91392c3716055dab"
+
+@app.get("/api/aqi/stations", response_model=AQIStationsResponse)
+async def get_aqi_stations_by_bounds(
+    min_lat: float = Query(..., description="Minimum latitude"),
+    min_lon: float = Query(..., description="Minimum longitude"),
+    max_lat: float = Query(..., description="Maximum latitude"),
+    max_lon: float = Query(..., description="Maximum longitude"),
+    include_details: bool = Query(False, description="Include detailed pollutant data for each station")
+):
+    """
+    Fetch AQI stations within geographic bounds.
+    Uses the same WAQI API logic as map.py
+    """
+    try:
+        # Format bounds as required by WAQI API: lat1,lon1,lat2,lon2
+        latlng_bounds = f"{min_lat},{min_lon},{max_lat},{max_lon}"
+        url = f"https://api.waqi.info/map/bounds/?latlng={latlng_bounds}&token={WAQI_TOKEN}"
+        
+        response = requests.get(url, timeout=30)
+        data = response.json()
+        
+        if data.get("status") != "ok":
+            raise HTTPException(
+                status_code=400,
+                detail=f"WAQI API Error: {data.get('data', 'Unknown error')}"
+            )
+        
+        stations_raw = data.get("data", [])
+        station_data = []
+        
+        if include_details:
+            # Fetch detailed data for each station (same logic as map.py)
+            for i, station in enumerate(stations_raw):
+                try:
+                    lat = station.get("lat")
+                    lon = station.get("lon")
+                    aqi = station.get("aqi")
+                    
+                    if aqi is None or aqi == "-":
+                        continue
+                    
+                    aqi = float(aqi)
+                    name = station.get("station", {}).get("name", "Unknown")
+                    
+                    # Get detailed feed data
+                    detail_url = f"https://api.waqi.info/feed/geo:{lat};{lon}/?token={WAQI_TOKEN}"
+                    detail_response = requests.get(detail_url, timeout=10)
+                    detail_data = detail_response.json()
+                    
+                    if detail_data.get("status") == "ok":
+                        station_full = detail_data.get("data", {})
+                        iaqi = station_full.get("iaqi", {})
+                        time_data = station_full.get("time", {})
+                        
+                        station_data.append({
+                            "name": name,
+                            "lon": lon,
+                            "lat": lat,
+                            "aqi": aqi,
+                            "pm25": iaqi.get("pm25", {}).get("v"),
+                            "pm10": iaqi.get("pm10", {}).get("v"),
+                            "no2": iaqi.get("no2", {}).get("v"),
+                            "o3": iaqi.get("o3", {}).get("v"),
+                            "updated": time_data.get("s", "Unknown")
+                        })
+                    
+                    # Rate limiting - small delay between requests
+                    time.sleep(0.1)
+                    
+                except Exception as e:
+                    # Continue processing other stations if one fails
+                    continue
+        else:
+            # Return basic station data without detailed fetch
+            for station in stations_raw:
+                try:
+                    lat = station.get("lat")
+                    lon = station.get("lon")
+                    aqi = station.get("aqi")
+                    
+                    if aqi is None or aqi == "-":
+                        continue
+                    
+                    aqi = float(aqi)
+                    name = station.get("station", {}).get("name", "Unknown")
+                    
+                    station_data.append({
+                        "name": name,
+                        "lon": lon,
+                        "lat": lat,
+                        "aqi": aqi,
+                        "pm25": None,
+                        "pm10": None,
+                        "no2": None,
+                        "o3": None,
+                        "updated": None
+                    })
+                except Exception as e:
+                    continue
+        
+        # Calculate average AQI
+        aqi_values = [s["aqi"] for s in station_data if s["aqi"] is not None]
+        average_aqi = sum(aqi_values) / len(aqi_values) if aqi_values else None
+        
+        return AQIStationsResponse(
+            stations=[StationData(**s) for s in station_data],
+            total_stations=len(station_data),
+            average_aqi=average_aqi
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching AQI stations: {str(e)}"
+        )
+
+@app.get("/api/aqi/feed/{lat}/{lon}", response_model=AQIFeedResponse)
+async def get_aqi_feed_by_coordinates(
+    lat: float,
+    lon: float
+):
+    """
+    Get detailed AQI feed for a specific geographic location.
+    Uses the same WAQI API logic as map.py
+    """
+    try:
+        # Get detailed feed data (same as map.py detail_url)
+        detail_url = f"https://api.waqi.info/feed/geo:{lat};{lon}/?token={WAQI_TOKEN}"
+        detail_response = requests.get(detail_url, timeout=10)
+        detail_data = detail_response.json()
+        
+        if detail_data.get("status") != "ok":
+            raise HTTPException(
+                status_code=400,
+                detail=f"WAQI API Error: {detail_data.get('data', 'Unknown error')}"
+            )
+        
+        station_full = detail_data.get("data", {})
+        iaqi = station_full.get("iaqi", {})
+        time_data = station_full.get("time", {})
+        station_info = station_full.get("station", {})
+        
+        # Get AQI value
+        aqi = station_full.get("aqi")
+        if aqi is None:
+            # Try to get from iaqi if main aqi is not available
+            aqi = station_full.get("iaqi", {}).get("aqi", {}).get("v")
+        
+        if aqi is None:
+            raise HTTPException(
+                status_code=404,
+                detail="AQI data not available for this location"
+            )
+        
+        return AQIFeedResponse(
+            name=station_info.get("name", "Unknown Station"),
+            lon=lon,
+            lat=lat,
+            aqi=float(aqi),
+            pm25=iaqi.get("pm25", {}).get("v"),
+            pm10=iaqi.get("pm10", {}).get("v"),
+            no2=iaqi.get("no2", {}).get("v"),
+            o3=iaqi.get("o3", {}).get("v"),
+            so2=iaqi.get("so2", {}).get("v"),
+            co=iaqi.get("co", {}).get("v"),
+            updated=time_data.get("s", "Unknown"),
+            station=station_info
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching AQI feed: {str(e)}"
+        )
+
+@app.get("/api/aqi/bounds")
+async def get_aqi_bounds(
+    min_lat: float = Query(..., description="Minimum latitude"),
+    min_lon: float = Query(..., description="Minimum longitude"),
+    max_lat: float = Query(..., description="Maximum latitude"),
+    max_lon: float = Query(..., description="Maximum longitude")
+):
+    """
+    Get raw AQI station data within geographic bounds.
+    Returns the raw response from WAQI API without detailed processing.
+    """
+    try:
+        latlng_bounds = f"{min_lat},{min_lon},{max_lat},{max_lon}"
+        url = f"https://api.waqi.info/map/bounds/?latlng={latlng_bounds}&token={WAQI_TOKEN}"
+        
+        response = requests.get(url, timeout=30)
+        data = response.json()
+        
+        if data.get("status") != "ok":
+            raise HTTPException(
+                status_code=400,
+                detail=f"WAQI API Error: {data.get('data', 'Unknown error')}"
+            )
+        
+        return {
+            "status": "ok",
+            "data": data.get("data", []),
+            "total_stations": len(data.get("data", []))
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching AQI bounds: {str(e)}"
+        )
+
+# AQI Data Management Endpoints
+@app.get("/api/aqi/wards")
+async def get_selected_wards():
+    """Get the 4 selected wards for AQI monitoring"""
+    try:
+        response = supabase.table("selected_wards").select("*").eq("is_active", True).execute()
+        return response.data
+    except Exception as e:
+        # Fallback to JSON file
+        import json
+        json_path = os.path.join(os.path.dirname(__file__), "selected_wards.json")
+        if os.path.exists(json_path):
+            with open(json_path, 'r') as f:
+                return json.load(f)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/aqi/daily")
+async def get_daily_aqi_data(
+    ward_no: Optional[str] = Query(None, description="Filter by ward number"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    limit: int = Query(100, description="Maximum number of records")
+):
+    """Get daily average AQI data from Supabase"""
+    try:
+        query = supabase.table("ward_aqi_daily").select("*")
+        
+        if ward_no:
+            query = query.eq("ward_no", ward_no)
+        
+        if start_date:
+            query = query.gte("date", start_date)
+        
+        if end_date:
+            query = query.lte("date", end_date)
+        
+        query = query.order("date", desc=True).limit(limit)
+        response = query.execute()
+        
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/aqi/daily/{ward_no}")
+async def get_ward_daily_aqi(
+    ward_no: str,
+    days: int = Query(30, description="Number of days to retrieve")
+):
+    """Get daily AQI data for a specific ward"""
+    try:
+        from datetime import timedelta
+        start_date = (date.today() - timedelta(days=days)).isoformat()
+        
+        response = supabase.table("ward_aqi_daily")\
+            .select("*")\
+            .eq("ward_no", ward_no)\
+            .gte("date", start_date)\
+            .order("date", desc=True)\
+            .execute()
+        
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/aqi/scheduler/status")
+async def get_scheduler_status():
+    """Get status of the AQI data collection scheduler"""
+    try:
+        scheduler = get_scheduler()
+        jobs = scheduler.get_jobs()
+        
+        return {
+            "is_running": scheduler.is_running,
+            "jobs": [
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run": job.next_run_time.isoformat() if job.next_run_time else None
+                }
+                for job in jobs
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/aqi/scheduler/trigger/hourly")
+async def trigger_hourly_collection():
+    """Manually trigger hourly AQI data collection"""
+    try:
+        scheduler = get_scheduler()
+        scheduler.trigger_hourly_fetch()
+        return {"message": "Hourly data collection triggered successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/aqi/scheduler/trigger/daily")
+async def trigger_daily_calculation():
+    """Manually trigger daily average calculation"""
+    try:
+        scheduler = get_scheduler()
+        scheduler.trigger_daily_calculation()
+        return {"message": "Daily average calculation triggered successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Health Check Endpoints
 @app.get("/")
