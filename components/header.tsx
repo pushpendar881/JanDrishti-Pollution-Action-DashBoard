@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
 import { MapPin, Building2, Bell, Search, Menu, User } from "lucide-react"
+import { ModeToggle } from "./mode-toggle"
 
 interface HeaderProps {
   selectedCity: string
@@ -40,7 +41,7 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
     <header 
       className={`sticky top-0 z-50 transition-all duration-500 ${
         isScrolled 
-          ? "py-3 glass-morphism-strong border-b border-white/10" 
+          ? "py-3 glass-morphism-strong border-b" 
           : "py-6 bg-transparent"
       }`}
     >
@@ -84,8 +85,8 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
 
         <div className="flex items-center gap-4">
           {/* Locality Selectors */}
-          <div className="hidden md:flex items-center gap-2 p-1 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors group cursor-pointer">
+          <div className="hidden md:flex items-center gap-2 p-1 rounded-2xl bg-muted/30 border backdrop-blur-md">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/50 transition-colors group cursor-pointer">
               <MapPin size={14} className="text-primary group-hover:animate-bounce" />
               <select
                 value={selectedCity}
@@ -93,16 +94,16 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
                 className="bg-transparent text-sm font-bold text-foreground outline-none cursor-pointer"
               >
                 {cities.map((city) => (
-                  <option key={city.id} value={city.id} className="bg-slate-900">
+                  <option key={city.id} value={city.id} className="bg-background">
                     {city.name}
                   </option>
                 ))}
               </select>
             </div>
             
-            <div className="w-px h-4 bg-white/10" />
+            <div className="w-px h-4 bg-border" />
 
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors group cursor-pointer">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/50 transition-colors group cursor-pointer">
               <Building2 size={14} className="text-accent group-hover:animate-bounce" />
               <select
                 value={selectedWard}
@@ -110,7 +111,7 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
                 className="bg-transparent text-sm font-bold text-foreground outline-none cursor-pointer"
               >
                 {filteredWards.map((ward) => (
-                  <option key={ward.id} value={ward.id} className="bg-slate-900">
+                  <option key={ward.id} value={ward.id} className="bg-background">
                     {ward.name}
                   </option>
                 ))}
@@ -120,16 +121,18 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
-            <button className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all text-muted-foreground hover:text-primary">
+            <ModeToggle />
+            <button className="p-2.5 rounded-xl bg-muted/30 border hover:bg-muted/50 transition-all text-muted-foreground hover:text-primary">
               <Bell size={18} />
             </button>
-            <button className="hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-xl grad-primary text-primary-foreground font-bold text-sm hover:scale-105 transition-all shadow-lg shadow-primary/20">
-              <User size={16} />
-              Console
-            </button>
-            <button className="lg:hidden p-2.5 rounded-xl bg-white/5 border border-white/10 text-foreground">
-              <Menu size={18} />
-            </button>
+
+          <button className="hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-xl grad-primary text-primary-foreground font-bold text-sm hover:scale-105 transition-all shadow-lg shadow-primary/20">
+            <User size={16} />
+            Console
+          </button>
+          <button className="lg:hidden p-2.5 rounded-xl bg-muted/30 border text-foreground">
+            <Menu size={18} />
+          </button>
           </div>
         </div>
       </div>
