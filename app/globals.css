@@ -82,6 +82,13 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  @keyframes shimmer {
+    from { background-position: 0% 50%; }
+    to { background-position: 200% 50%; }
+  }
+
+  --animate-shimmer: shimmer 3s linear infinite;
 }
 
 @layer base {
