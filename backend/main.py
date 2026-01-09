@@ -10,13 +10,9 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from jose import JWTError, jwt
 from groq import Groq
-from groq import Groq
+
 
 load_dotenv()
-client = Groq(
-    api_key=os.environ.get("GROQ_API"),
-)
-
 
 app = FastAPI(title="JanDrishti API", version="1.0.0")
 
@@ -97,10 +93,11 @@ class ChatMessageCreate(BaseModel):
 class ChatMessageResponse(BaseModel):
     id: str
     user_id: str
-    message: str
-    response: Optional[str]
-    type: str
+    user_message: str
+    bot_response: Optional[str]
     created_at: str
+
+
 
 # Authentication Helper Functions
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -161,7 +158,7 @@ async def generate_ai_response(user_message: str, user_context: dict = None) -> 
                     "content": user_message
                 }
             ],
-            model="llama-3.1-70b-versatile",  # You can change this to other Groq models
+            model="llama-3.3-70b-versatile",
             temperature=0.7,
             max_tokens=500,
             top_p=1,
@@ -389,8 +386,8 @@ async def update_report(
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/reports/{report_id}/upvote")
-async def upvote_report(report_id: str):
-    """Upvote a report (public endpoint)"""
+async def upvote_report(report_id: str, current_user = Depends(get_current_user)):
+    """Upvote a report (requires authentication)"""
     try:
         # Get current upvotes
         report = supabase.table("reports").select("upvotes").eq("id", report_id).single().execute()
@@ -430,63 +427,30 @@ async def create_chat_message(
 ):
     """Send a chat message (requires authentication)"""
     try:
-        # Save user message
-        user_message_data = {
+        # Generate AI response
+        ai_response = await generate_ai_response(
+            user_message=message.message,
+            user_context={"location": "Unknown location"}
+        )
+        
+        # Save conversation pair
+        message_data = {
             "user_id": current_user.id,
-            "message": message.message,
-            "type": "user"
+            "user_message": message.message,
+            "bot_response": ai_response
         }
         
-        user_message = supabase.table("chat_messages").insert(user_message_data).execute()
+        response = supabase.table("chat_messages").insert(message_data).execute()
         
-        # TODO: Integrate with AI service (OpenAI, Anthropic, etc.)
-        # For now, return a simple response
+        # Return the saved data directly from database
+        return response.data[0]
         
-        chat_completion = groq_client.chat.completions.create(
-    messages=[
-        {
-            "role": """You are an AI assistant for a ward-wise pollution monitoring website.
-
-Your job is to help users understand AQI, pollution levels, health impacts, rules, and actions in simple language.
-
-Guidelines:
-• Use live ward-level data, history, and forecasts when available.
-• Explain pollution causes, safety do’s and don’ts, and reporting steps.
-• Be accurate, neutral, and easy to understand.
-
-Rules:
-• Do not guess or invent data.
-• Clearly say when data is unavailable.
-• Do not give medical or legal advice.
-• Keep responses short, clear, and polite.
-""",
-            "content": message.message
-        }
-    ],
-    model="llama-3.1-70b-versatile",
-)
-        
-        # Save bot response
-        bot_message_data = {
-            "user_id": current_user.id,
-            "message": message.message,
-            "response": chat_completion.choices[0].message.content,
-            "type": "bot"
-        }
-        
-        bot_message = supabase.table("chat_messages").insert(bot_message_data).execute()
-        
-        return {
-            "id": user_message.data[0]["id"],
-            "user_id": current_user.id,
-            "message": message.message,
-            "response": chat_completion.choices[0].message.content,
-            "type": "user",
-            "created_at": user_message.data[0]["created_at"]
-        }
     except Exception as e:
+        print(f"Error in create_chat_message: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
 
+# Health Check Endpoints
 @app.get("/")
 async def root():
     return {"message": "JanDrishti API", "version": "1.0.0"}

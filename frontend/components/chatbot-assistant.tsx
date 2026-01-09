@@ -2,15 +2,15 @@
 
 import { useState, useEffect } from "react"
 import { useAuth } from "@/context/auth-context"
-import { chatService } from "@/lib/api"
+import { chatAPI } from "@/lib/api"
 import AuthDialog from "@/components/auth-dialog"
 import { toast } from "sonner"
 
 interface Message {
   id: string
   user_id: string
-  message: string
-  response?: string
+  user_message: string  // Changed from 'message'
+  bot_response?: string  // Changed from 'response'
   type: "user" | "bot"
   created_at: string
   suggestions?: string[]
@@ -30,13 +30,13 @@ export default function ChatbotAssistant() {
   useEffect(() => {
     if (isAuthenticated && isOpen) {
       loadChatHistory()
-    } else if (!isAuthenticated) {
+    } else if (!isAuthenticated && isOpen) {
       // Show welcome message for non-authenticated users
       setMessages([{
         id: "welcome",
         user_id: "",
-        message: "",
-        response: "Hi! I'm your AI pollution assistant. Please login to start a conversation and get personalized air quality insights.",
+        user_message: "",
+        bot_response: "Hi! I'm your AI pollution assistant. Please login to start a conversation and get personalized air quality insights.",
         type: "bot",
         created_at: new Date().toISOString(),
         suggestions: ["Login to Chat"]
@@ -45,18 +45,17 @@ export default function ChatbotAssistant() {
   }, [isAuthenticated, isOpen])
 
   const loadChatHistory = async () => {
-    if (!isAuthenticated) return
-
     setLoading(true)
     try {
-      const history = await chatService.getMessages({ limit: 20 })
-      if (history.length === 0) {
-        // Show welcome message for authenticated users
+      const chatMessages = await chatAPI.getMessages()
+      
+      if (chatMessages.length === 0) {
+        // Show welcome message if no history
         setMessages([{
-          id: "welcome-auth",
+          id: "welcome",
           user_id: user?.id || "",
-          message: "",
-          response: "Hi! I'm your AI pollution assistant. I can help you understand air quality data, health recommendations, and government policies. What would you like to know?",
+          user_message: "",
+          bot_response: "Hi! I'm your AI pollution assistant. I can help you understand air quality data, health recommendations, and government policies. What would you like to know?",
           type: "bot",
           created_at: new Date().toISOString(),
           suggestions: [
@@ -67,81 +66,110 @@ export default function ChatbotAssistant() {
           ]
         }])
       } else {
-        // Convert API response to component format
-        const formattedMessages = history.reverse().map(msg => ({
-          ...msg,
-          suggestions: msg.type === "bot" ? [
-            "More information",
-            "Emergency contacts",
-            "Government helplines"
-          ] : undefined
-        }))
-        setMessages(formattedMessages)
+        // Transform messages: each bot message contains both user question and AI response
+        const transformedMessages: Message[] = []
+        
+        chatMessages.reverse().forEach((msg) => {
+          // Add user message
+          transformedMessages.push({
+            id: `user-${msg.id}`,
+            user_id: msg.user_id,
+            user_message: msg.user_message,
+            type: "user",
+            created_at: msg.created_at,
+          })
+          
+          // Add bot response
+          if (msg.bot_response) {
+            transformedMessages.push({
+              id: msg.id,
+              user_id: msg.user_id,
+              user_message: msg.user_message,
+              bot_response: msg.bot_response,
+              type: "bot",
+              created_at: msg.created_at,
+            })
+          }
+        })
+        
+        setMessages(transformedMessages)
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to load chat history:", error)
       toast.error("Failed to load chat history")
+      // Show welcome message as fallback
+      setMessages([{
+        id: "welcome",
+        user_id: "",
+        user_message: "",
+        bot_response: "Hi! I'm your AI pollution assistant. What would you like to know?",
+        type: "bot",
+        created_at: new Date().toISOString(),
+      }])
     } finally {
       setLoading(false)
     }
   }
 
-  const quickResponses = {
-    "What's the current AQI?": "The current AQI in Central Delhi is 206, which is in the 'Severe' category. This means the air quality is hazardous and everyone should avoid outdoor activities. I recommend staying indoors and using air purifiers if available.",
-
-    "Health tips for high pollution": "Here are key health tips for severe pollution:\n\n• Use N95 or P100 masks when going outside\n• Keep windows and doors closed\n• Use air purifiers indoors\n• Avoid outdoor exercise\n• Stay hydrated\n• Eat antioxidant-rich foods\n• Consult a doctor if you have breathing issues",
-
-    "Government regulations": "Current government measures in effect:\n\n• Odd-even vehicle scheme active\n• Construction activities banned\n• Industrial operations at 70% capacity\n• Public transport frequency increased\n• Emergency health advisories issued\n• Schools may be closed if AQI exceeds 300",
-
-    "Best time to go outside": "Based on current patterns:\n\n• Avoid 6-10 AM (morning rush)\n• Avoid 7-11 PM (evening rush)\n• Best time: 11 AM - 4 PM\n• Weekends generally have 20% lower pollution\n• Check real-time AQI before going out\n• Always wear a mask regardless of time"
-  }
-
   const handleSendMessage = async (content: string) => {
     if (!content.trim()) return
 
+    // Check authentication
     if (!isAuthenticated) {
       setShowAuthDialog(true)
       return
     }
 
-    // Add user message to UI immediately
-    const tempUserMessage: Message = {
+    // Add user message optimistically
+    const userMessage: Message = {
       id: `temp-${Date.now()}`,
       user_id: user?.id || "",
-      message: content,
+      user_message: content,
       type: "user",
       created_at: new Date().toISOString()
     }
 
-    setMessages(prev => [...prev, tempUserMessage])
+    setMessages(prev => [...prev, userMessage])
     setInputValue("")
     setIsTyping(true)
 
     try {
-      // Send message to backend
-      const response = await chatService.sendMessage(content)
-
-      // Replace temp message with real response
-      setMessages(prev => prev.map(msg =>
-        msg.id === tempUserMessage.id
-          ? {
-            ...response,
+      // Send message to API
+      const response = await chatAPI.sendMessage(content)
+      
+      // Remove temp user message and add the bot response
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== userMessage.id)
+        return [
+          ...filtered,
+          // Add user message
+          {
+            id: `user-${response.id}`,
+            user_id: user?.id || "",
+            user_message: content,
+            type: "user",
+            created_at: new Date().toISOString()
+          },
+          // Add bot response
+          {
+            id: response.id,
+            user_id: response.user_id,
+            user_message: response.user_message,
+            bot_response: response.bot_response || "I understand you're asking about pollution-related information.",
+            type: "bot",
+            created_at: response.created_at,
             suggestions: [
               "More information",
               "Emergency contacts",
               "Government helplines"
             ]
           }
-          : msg
-      ))
-    } catch (error: any) {
-      console.error("Failed to send message:", error)
-      toast.error("Failed to send message", {
-        description: error.message || "Please try again later"
+        ]
       })
-
-      // Remove the temp message on error
-      setMessages(prev => prev.filter(msg => msg.id !== tempUserMessage.id))
+    } catch (error: any) {
+      toast.error("Failed to send message: " + (error.message || "Unknown error"))
+      // Remove the optimistic message on error
+      setMessages(prev => prev.filter(m => m.id !== userMessage.id))
     } finally {
       setIsTyping(false)
     }
@@ -172,8 +200,9 @@ export default function ChatbotAssistant() {
       {/* Floating Chat Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`fixed bottom-6 right-6 w-16 h-16 rounded-2xl bg-gradient-to-r from-primary to-accent text-white shadow-2xl hover:shadow-3xl transition-all duration-300 z-50 flex items-center justify-center hover:scale-110 ${isOpen ? "rotate-45" : "hover:rotate-12"
-          }`}
+        className={`fixed bottom-6 right-6 w-16 h-16 rounded-2xl bg-gradient-to-r from-primary to-accent text-white shadow-2xl hover:shadow-3xl transition-all duration-300 z-50 flex items-center justify-center hover:scale-110 ${
+          isOpen ? "rotate-45" : "hover:rotate-12"
+        }`}
       >
         {isOpen ? (
           <span className="text-2xl">✕</span>
@@ -219,13 +248,14 @@ export default function ChatbotAssistant() {
                   className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[80%] p-3 rounded-2xl ${message.type === "user"
+                    className={`max-w-[80%] p-3 rounded-2xl ${
+                      message.type === "user"
                         ? "bg-primary text-white"
                         : "bg-muted border border-border text-foreground"
-                      }`}
+                    }`}
                   >
                     <p className="text-sm leading-relaxed whitespace-pre-line">
-                      {message.type === "user" ? message.message : message.response}
+                      {message.type === "user" ? message.user_message : message.bot_response}
                     </p>
 
                     {message.suggestions && (
@@ -297,19 +327,22 @@ export default function ChatbotAssistant() {
             <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => handleSuggestionClick("Emergency contacts")}
-                className="px-3 py-1 rounded-lg bg-background border border-border text-xs text-foreground hover:border-red-500/40 hover:text-red-400 transition-all duration-300"
+                disabled={!isAuthenticated}
+                className="px-3 py-1 rounded-lg bg-background border border-border text-xs text-foreground hover:border-red-500/40 hover:text-red-400 transition-all duration-300 disabled:opacity-50"
               >
                 🚨 Emergency
               </button>
               <button
                 onClick={() => handleSuggestionClick("Health precautions")}
-                className="px-3 py-1 rounded-lg bg-background border border-border text-xs text-foreground hover:border-green-500/40 hover:text-green-400 transition-all duration-300"
+                disabled={!isAuthenticated}
+                className="px-3 py-1 rounded-lg bg-background border border-border text-xs text-foreground hover:border-green-500/40 hover:text-green-400 transition-all duration-300 disabled:opacity-50"
               >
                 🏥 Health
               </button>
               <button
                 onClick={() => handleSuggestionClick("Government helplines")}
-                className="px-3 py-1 rounded-lg bg-background border border-border text-xs text-foreground hover:border-blue-500/40 hover:text-blue-400 transition-all duration-300"
+                disabled={!isAuthenticated}
+                className="px-3 py-1 rounded-lg bg-background border border-border text-xs text-foreground hover:border-blue-500/40 hover:text-blue-400 transition-all duration-300 disabled:opacity-50"
               >
                 📞 Helpline
               </button>

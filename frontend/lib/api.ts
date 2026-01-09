@@ -152,13 +152,14 @@ export const reportsService = {
     return response.data
   },
 
-  async upvoteReport(id: string) {
+  async upvote(id: string) {
     const response = await api.post(`/api/reports/${id}/upvote`)
     return response.data
   }
 }
 
-export const chatService = {
+// Chat API - use this in your components
+export const chatAPI = {
   async getMessages(params?: { limit?: number; offset?: number }) {
     const response = await api.get('/api/chat/messages', { params })
     return response.data
@@ -169,6 +170,9 @@ export const chatService = {
     return response.data
   }
 }
+
+// Alias for backward compatibility
+export const chatService = chatAPI
 
 // Mock AQI service (replace with real API integration)
 export const aqiService = {
