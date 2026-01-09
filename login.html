@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - JanDrishti</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="login-page-body">
+    <div class="container login-page-container">
+        <!-- Back to Home Link -->
+        <a href="index.html" class="back-home-link">← Back to Home</a>
+    </div>
+
+    <!-- Login Modal -->
+    <div class="modal show" id="login-modal">
+        <div class="modal-content">
+            <span class="close-btn" id="close-modal">&times;</span>
+            
+            <div class="login-box">
+                <h1>Welcome to JanDrishti</h1>
+                <p class="subtitle">Seeing cities through people's lenses</p>
+                
+                <form class="login-form" id="login-form">
+                    <div class="form-group">
+                        <label for="email">Email</label>
+                        <input type="email" id="email" name="email" placeholder="Enter your email" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" placeholder="Enter your password" required>
+                    </div>
+                    
+                    <button type="submit" class="login-btn">Login</button>
+                </form>
+                
+                <div class="signup-link">
+                    Don't have an account? <a href="#" id="signup-trigger">Sign up</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signup Modal -->
+    <div class="modal" id="signup-modal">
+        <div class="modal-content">
+            <span class="close-btn" id="close-signup">&times;</span>
+            
+            <div class="login-box">
+                <h1>Create Account</h1>
+                <p class="subtitle">Join JanDrishti Community</p>
+                
+                <form class="login-form" id="signup-form">
+                    <div class="form-group">
+                        <label for="fullname">Full Name</label>
+                        <input type="text" id="fullname" name="fullname" placeholder="Enter your full name" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="signup-email">Email</label>
+                        <input type="email" id="signup-email" name="email" placeholder="Enter your email" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="signup-password">Password</label>
+                        <input type="password" id="signup-password" name="password" placeholder="Create a password" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="confirm-password">Confirm Password</label>
+                        <input type="password" id="confirm-password" name="confirm-password" placeholder="Confirm your password" required>
+                    </div>
+                    
+                    <button type="submit" class="login-btn">Sign Up</button>
+                </form>
+                
+                <div class="signup-link">
+                    Already have an account? <a href="#" id="back-to-login">Login</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="login-modal.js"></script>
+</body>
+</html>
