@@ -1,5 +1,8 @@
 "use client"
 
+import { motion } from "framer-motion"
+import { Wind, Thermometer, Droplets, Gauge, AlertCircle, MapPin, Share2 } from "lucide-react"
+
 interface AQIData {
   value: number
   status: string
@@ -28,152 +31,153 @@ export default function MainMetrics({ aqiData, selectedWard }: MainMetricsProps)
   }
 
   const wardName = wardNames[selectedWard as keyof typeof wardNames] || "Central Delhi"
+
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "good": return "text-emerald-400"
+      case "moderate": return "text-amber-400"
+      case "unhealthy": return "text-orange-500"
+      case "severe": return "text-red-500"
+      default: return "text-primary"
+    }
+  }
+
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-border/40 backdrop-blur-xl glass-effect p-10 hover:border-border/60 transition-all duration-500 hover-lift hover-glow group">
-      {/* Enhanced background effects */}
-      <div className="absolute inset-0 opacity-30">
-        <div className="absolute inset-0 premium-gradient blur-2xl"></div>
-      </div>
+    <div className="relative group">
+      {/* Background Glow */}
+      <div className="absolute -inset-1 bg-gradient-to-r from-primary/20 to-accent/20 rounded-[2rem] blur-xl opacity-50 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
+      
+      <div className="relative rounded-[2rem] glass-morphism border border-white/5 p-8 md:p-10 overflow-hidden">
+        {/* Decorative Elements */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-[80px] -mr-32 -mt-32" />
+        <div className="absolute bottom-0 left-0 w-64 h-64 bg-accent/5 rounded-full blur-[80px] -ml-32 -mb-32" />
 
-      <div className="absolute top-0 right-0 w-80 h-80 bg-primary/8 rounded-full blur-3xl animate-subtle-float"></div>
-      <div
-        className="absolute bottom-0 left-0 w-64 h-64 bg-accent/6 rounded-full blur-3xl animate-subtle-float"
-        style={{ animationDelay: "3s" }}
-      ></div>
-
-      <div className="relative z-10 space-y-8">
-        <div className="flex items-start justify-between animate-fade-slide-in" style={{ animationDelay: "0.1s" }}>
-          <div>
-            <div className="flex items-center gap-3 mb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-red-500 animate-glow-pulse shadow-lg shadow-red-500/50"></div>
-                <span className="text-xs font-bold tracking-wider text-red-400 uppercase">Live Data</span>
+        <div className="relative z-10 flex flex-col lg:flex-row gap-12">
+          {/* Main AQI Display */}
+          <div className="lg:w-1/3 flex flex-col items-center justify-center text-center space-y-6">
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-bold uppercase tracking-widest">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                Live Status
               </div>
-              <div className="px-3 py-1 rounded-full bg-primary/20 border border-primary/30 text-xs font-semibold text-primary">
-                Real-time
-              </div>
-            </div>
-            <h1 className="text-4xl font-bold text-foreground mb-2">{wardName} Air Quality</h1>
-            <p className="text-muted-foreground font-medium">Ward-wise pollution monitoring with real-time updates</p>
-          </div>
-
-          <div className="flex gap-3">
-            <button className="p-3 rounded-xl glass-effect border border-border/40 text-primary hover:border-primary/50 transition-all hover:scale-110 duration-300 hover-glow group/btn">
-              <span className="text-xl group-hover/btn:scale-110 transition-transform">📍</span>
-            </button>
-            <button className="p-3 rounded-xl glass-effect border border-border/40 text-primary hover:border-primary/50 transition-all hover:scale-110 duration-300 hover-glow group/btn">
-              <span className="text-xl group-hover/btn:scale-110 transition-transform">♥</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-          {/* Enhanced AQI Gauge */}
-          <div
-            className="flex flex-col items-center justify-center animate-fade-slide-in"
-            style={{ animationDelay: "0.2s" }}
-          >
-            <div className="relative w-56 h-56 group/gauge">
-              <div className="absolute inset-0 rounded-full bg-gradient-to-r from-primary/30 to-accent/30 p-2 group-hover/gauge:animate-rotate-slow transition-all">
-                <div className="w-full h-full rounded-full glass-effect flex flex-col items-center justify-center backdrop-blur transition-all duration-500 group-hover/gauge:shadow-2xl group-hover/gauge:shadow-primary/30 border border-border/30">
-                  <span className="text-7xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent transition-all duration-300 group-hover/gauge:scale-110">
-                    {aqiData.value}
-                  </span>
-                  <span className="text-sm font-semibold text-muted-foreground mt-3 uppercase tracking-wider">
-                    {aqiData.status}
-                  </span>
-                  <div className="w-16 h-1 bg-gradient-to-r from-primary to-accent rounded-full mt-2 opacity-60"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Enhanced Metrics Cards */}
-          <div
-            className="lg:col-span-2 flex flex-col justify-between gap-6 animate-fade-slide-in"
-            style={{ animationDelay: "0.3s" }}
-          >
-            {/* Top Row */}
-            <div className="grid grid-cols-2 gap-6">
-              <div className="rounded-2xl glass-effect border border-border/40 p-6 hover:border-red-500/40 transition-all duration-300 hover-lift hover:glass-effect group/card">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center">
-                    <span className="text-red-500 text-lg">⚠️</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">Air Quality Status</p>
-                </div>
-                <p className="text-3xl font-bold text-red-500 transition-all duration-300 group-hover/card:scale-105">
-                  {aqiData.status}
-                </p>
-              </div>
-
-              <div className="rounded-2xl glass-effect border border-border/40 p-6 hover:border-accent/40 transition-all duration-300 hover-lift hover:glass-effect group/card">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-8 h-8 rounded-lg bg-accent/20 flex items-center justify-center">
-                    <span className="text-accent text-lg">🌡️</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">Temperature</p>
-                </div>
-                <p className="text-3xl font-bold text-accent transition-all duration-300 group-hover/card:scale-105">
-                  {aqiData.temperature}°C
-                </p>
-              </div>
+              <h2 className="text-2xl font-bold flex items-center justify-center gap-2">
+                <MapPin size={20} className="text-primary" />
+                {wardName}
+              </h2>
             </div>
 
-            {/* Bottom Row */}
-            <div className="grid grid-cols-3 gap-4">
-              {[
-                { label: "PM2.5", value: aqiData.pm25, unit: "µg/m³", color: "primary", icon: "🔴" },
-                { label: "PM10", value: aqiData.pm10, unit: "µg/m³", color: "accent", icon: "🟠" },
-                { label: "Humidity", value: aqiData.humidity, unit: "%", color: "blue", icon: "💧" },
-              ].map((metric, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-xl glass-effect border border-border/40 p-5 hover:border-primary/40 transition-all duration-300 hover-lift group/metric transform hover:scale-105"
+            <div className="relative w-48 h-48 md:w-56 md:h-56">
+              <svg className="w-full h-full transform -rotate-90">
+                <circle
+                  cx="50%"
+                  cy="50%"
+                  r="45%"
+                  className="stroke-white/5 fill-none"
+                  strokeWidth="8"
+                />
+                <motion.circle
+                  cx="50%"
+                  cy="50%"
+                  r="45%"
+                  className="stroke-primary fill-none"
+                  strokeWidth="8"
+                  strokeDasharray="283"
+                  initial={{ strokeDashoffset: 283 }}
+                  animate={{ strokeDashoffset: 283 - (283 * Math.min(aqiData.value, 300)) / 300 }}
+                  transition={{ duration: 1.5, ease: "easeOut" }}
+                  strokeLinecap="round"
+                  style={{ filter: "drop-shadow(0 0 8px rgba(56, 189, 248, 0.5))" }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <motion.span 
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="text-6xl md:text-7xl font-bold font-display"
                 >
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-sm">{metric.icon}</span>
-                    <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">{metric.label}</p>
+                  {aqiData.value}
+                </motion.span>
+                <span className={`text-sm font-bold uppercase tracking-widest ${getStatusColor(aqiData.status)}`}>
+                  {aqiData.status}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <button className="p-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-muted-foreground hover:text-foreground">
+                <Share2 size={20} />
+              </button>
+              <button className="px-6 py-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors font-bold text-sm">
+                View History
+              </button>
+            </div>
+          </div>
+
+          {/* Metrics Grid */}
+          <div className="lg:w-2/3 space-y-8">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {[
+                { label: "PM2.5", value: aqiData.pm25, unit: "µg/m³", icon: <Wind className="text-primary" />, desc: "Fine particles" },
+                { label: "PM10", value: aqiData.pm10, unit: "µg/m³", icon: <Wind className="text-accent" />, desc: "Coarse particles" },
+                { label: "Temp", value: aqiData.temperature, unit: "°C", icon: <Thermometer className="text-orange-400" />, desc: "Ambient" },
+                { label: "Humidity", value: aqiData.humidity, unit: "%", icon: <Droplets className="text-blue-400" />, desc: "Relative" },
+                { label: "Wind", value: aqiData.windSpeed, unit: "km/h", icon: <Gauge className="text-emerald-400" />, desc: "Velocity" },
+                { label: "UV Index", value: aqiData.uvIndex, unit: "", icon: <AlertCircle className="text-amber-400" />, desc: "Exposure" },
+              ].map((item, i) => (
+                <motion.div
+                  key={item.label}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.1 }}
+                  className="p-5 rounded-2xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors group/card"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="p-2.5 rounded-xl bg-white/5 group-hover/card:scale-110 transition-transform">
+                      {item.icon}
+                    </div>
                   </div>
-                  <p className="text-2xl font-bold text-foreground transition-colors duration-300 group-hover/metric:text-primary">
-                    {metric.value}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1 font-medium">{metric.unit}</p>
-                </div>
+                  <div className="space-y-1">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-2xl font-bold font-display">{item.value}</span>
+                      <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">{item.unit}</span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">{item.label}</div>
+                  </div>
+                </motion.div>
               ))}
             </div>
-          </div>
-        </div>
 
-        <div className="mt-8 rounded-2xl glass-effect border border-border/40 p-6 hover:border-border/60 transition-all hover:glass-effect group/scale">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-              <span className="text-primary text-lg">📊</span>
+            {/* Scale Visualizer */}
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/5 space-y-4">
+              <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                <span>AQI Health Scale</span>
+                <span className="text-primary">Current: {aqiData.status}</span>
+              </div>
+              <div className="relative h-2 w-full rounded-full bg-white/5 overflow-hidden flex">
+                <div className="h-full w-[16.6%] bg-emerald-500" />
+                <div className="h-full w-[16.6%] bg-yellow-400" />
+                <div className="h-full w-[16.6%] bg-orange-500" />
+                <div className="h-full w-[16.6%] bg-red-500" />
+                <div className="h-full w-[16.6%] bg-purple-600" />
+                <div className="h-full w-[17%] bg-red-900" />
+                
+                {/* Pointer */}
+                <motion.div 
+                  initial={{ left: 0 }}
+                  animate={{ left: `${Math.min((aqiData.value / 300) * 100, 100)}%` }}
+                  transition={{ duration: 1.5, ease: "easeOut" }}
+                  className="absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_10px_white] z-10" 
+                />
+              </div>
+              <div className="flex justify-between text-[10px] font-bold text-muted-foreground">
+                <span>0</span>
+                <span>50</span>
+                <span>100</span>
+                <span>150</span>
+                <span>200</span>
+                <span>300+</span>
+              </div>
             </div>
-            <p className="text-sm text-muted-foreground font-semibold uppercase tracking-wide">Air Quality Index Scale</p>
-          </div>
-          <div className="flex gap-1 h-3 rounded-full overflow-hidden mb-3">
-            {[
-              { color: "bg-green-500", width: "flex-1", label: "Good" },
-              { color: "bg-yellow-500", width: "flex-1", label: "Moderate" },
-              { color: "bg-orange-500", width: "flex-1", label: "Unhealthy for Sensitive" },
-              { color: "bg-red-500", width: "flex-1", label: "Unhealthy" },
-              { color: "bg-purple-600", width: "flex-1", label: "Very Unhealthy" },
-              { color: "bg-red-800", width: "flex-1", label: "Hazardous" },
-            ].map((bar, idx) => (
-              <div
-                key={idx}
-                className={`${bar.color} ${bar.width} transition-all duration-300 group-hover/scale:shadow-lg group-hover/scale:shadow-current first:rounded-l-full last:rounded-r-full`}
-              ></div>
-            ))}
-          </div>
-          <div className="flex justify-between text-xs text-muted-foreground font-medium">
-            <span>0</span>
-            <span>50</span>
-            <span>100</span>
-            <span>150</span>
-            <span>200</span>
-            <span>300+</span>
           </div>
         </div>
       </div>

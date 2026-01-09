@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { motion } from "framer-motion"
+import { Maximize2, Minimize2, Map as MapIcon, Layers, Navigation } from "lucide-react"
 
 interface PollutionMapProps {
   selectedPollutant: string
@@ -12,11 +14,11 @@ export default function PollutionMap({ selectedPollutant }: PollutionMapProps) {
   const animationRef = useRef<number>(0)
 
   const locations = [
-    { id: 1, name: "New Delhi", lat: 28.6139, lng: 77.209, value: 206, color: "#ef4444" },
-    { id: 2, name: "Gurugram", lat: 28.4595, lng: 77.0266, value: 178, color: "#f97316" },
-    { id: 3, name: "Noida", lat: 28.5355, lng: 77.391, value: 192, color: "#ef4444" },
-    { id: 4, name: "Faridabad", lat: 28.4089, lng: 77.3178, value: 165, color: "#f59e0b" },
-    { id: 5, name: "Greater Noida", lat: 28.4744, lng: 77.5202, value: 150, color: "#eab308" },
+    { id: 1, name: "New Delhi", lat: 28.6139, lng: 77.209, value: 206, color: "#f87171" },
+    { id: 2, name: "Gurugram", lat: 28.4595, lng: 77.0266, value: 178, color: "#fbbf24" },
+    { id: 3, name: "Noida", lat: 28.5355, lng: 77.391, value: 192, color: "#f87171" },
+    { id: 4, name: "Faridabad", lat: 28.4089, lng: 77.3178, value: 165, color: "#fbbf24" },
+    { id: 5, name: "Greater Noida", lat: 28.4744, lng: 77.5202, value: 150, color: "#34d399" },
   ]
 
   useEffect(() => {
@@ -38,12 +40,14 @@ export default function PollutionMap({ selectedPollutant }: PollutionMapProps) {
       const width = canvas.offsetWidth
       const height = canvas.offsetHeight
 
-      ctx.fillStyle = "rgba(15, 23, 42, 0.2)"
+      // Clear with very slight fade for trails
+      ctx.fillStyle = "#020617"
       ctx.fillRect(0, 0, width, height)
 
-      ctx.strokeStyle = "rgba(14, 165, 233, 0.03)"
+      // Draw subtle grid
+      ctx.strokeStyle = "rgba(56, 189, 248, 0.05)"
       ctx.lineWidth = 1
-      const gridSize = 50
+      const gridSize = 40
       for (let i = 0; i < width; i += gridSize) {
         ctx.beginPath()
         ctx.moveTo(i, 0)
@@ -62,46 +66,57 @@ export default function PollutionMap({ selectedPollutant }: PollutionMapProps) {
         const x = (location.lng - 76.8) * 180 + width * 0.5
         const y = (location.lat - 28.3) * 220 + height * 0.35
 
-        const pulse = Math.sin(timestamp * 0.003 + index * 0.5) * 0.5 + 0.5
-        const ring1 = 25 + pulse * 15
-        const ring2 = 45 + pulse * 25
+        const pulse = Math.sin(timestamp * 0.002 + index * 0.5) * 0.5 + 0.5
+        const ring1 = 20 + pulse * 10
+        const ring2 = 40 + pulse * 20
 
-        ctx.strokeStyle = location.color + "30"
+        // Rings
+        ctx.strokeStyle = location.color + "20"
         ctx.lineWidth = 1
         ctx.beginPath()
         ctx.arc(x, y, ring2, 0, Math.PI * 2)
         ctx.stroke()
 
-        ctx.strokeStyle = location.color + "50"
+        ctx.strokeStyle = location.color + "40"
         ctx.lineWidth = 1.5
         ctx.beginPath()
         ctx.arc(x, y, ring1, 0, Math.PI * 2)
         ctx.stroke()
 
         const isHovered = hoveredLocation === location.id
-        const dotSize = isHovered ? 9 : 6
-        ctx.fillStyle = location.color
+        const dotSize = isHovered ? 10 : 7
+        
+        // Dot Glow
         ctx.shadowColor = location.color
-        ctx.shadowBlur = isHovered ? 20 : 10
+        ctx.shadowBlur = isHovered ? 25 : 15
+        ctx.fillStyle = location.color
         ctx.beginPath()
         ctx.arc(x, y, dotSize, 0, Math.PI * 2)
         ctx.fill()
         ctx.shadowBlur = 0
 
         if (isHovered) {
-          ctx.fillStyle = "rgba(17, 24, 39, 0.95)"
-          ctx.fillRect(x - 60, y - 45, 120, 35)
-          ctx.strokeStyle = location.color
-          ctx.lineWidth = 1
-          ctx.strokeRect(x - 60, y - 45, 120, 35)
+          // Tooltip Background
+          const tooltipW = 140
+          const tooltipH = 50
+          const tx = x - tooltipW / 2
+          const ty = y - tooltipH - 20
+          
+          ctx.fillStyle = "rgba(15, 23, 42, 0.9)"
+          ctx.beginPath()
+          ctx.roundRect(tx, ty, tooltipW, tooltipH, 12)
+          ctx.fill()
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.1)"
+          ctx.stroke()
 
           ctx.fillStyle = "white"
-          ctx.font = "bold 12px sans-serif"
+          ctx.font = "bold 12px Inter"
           ctx.textAlign = "center"
-          ctx.fillText(location.name, x, y - 28)
+          ctx.fillText(location.name, x, ty + 20)
+          
           ctx.fillStyle = location.color
-          ctx.font = "11px sans-serif"
-          ctx.fillText(`AQI: ${location.value}`, x, y - 13)
+          ctx.font = "bold 14px Space Grotesk"
+          ctx.fillText(`AQI: ${location.value}`, x, ty + 40)
         }
       })
 
@@ -124,7 +139,7 @@ export default function PollutionMap({ selectedPollutant }: PollutionMapProps) {
         const y = (location.lat - 28.3) * 220 + height * 0.35
         const distance = Math.sqrt((mouseX - x) ** 2 + (mouseY - y) ** 2)
 
-        if (distance < 25) {
+        if (distance < 30) {
           setHoveredLocation(location.id)
           canvas.style.cursor = "pointer"
           found = true
@@ -149,59 +164,63 @@ export default function PollutionMap({ selectedPollutant }: PollutionMapProps) {
   }, [hoveredLocation])
 
   return (
-    <div className="relative rounded-3xl border border-border/40 backdrop-blur-xl glass-effect overflow-hidden hover:border-border/60 transition-all duration-500 h-[550px] group">
+    <div className="relative rounded-[2rem] glass-morphism border border-white/5 overflow-hidden h-[550px] group">
       <canvas ref={canvasRef} className="w-full h-full" />
 
-      {/* Enhanced header */}
-      <div className="absolute top-6 left-6 z-10 flex items-center gap-4">
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center border border-primary/20">
-          <span className="text-2xl">🗺️</span>
+      {/* Floating Header */}
+      <div className="absolute top-8 left-8 z-10 flex items-center gap-4">
+        <div className="w-12 h-12 rounded-2xl grad-primary flex items-center justify-center text-primary-foreground shadow-lg shadow-primary/20">
+          <MapIcon size={24} />
         </div>
-        <div>
-          <h3 className="text-xl font-bold text-foreground">Interactive Pollution Map</h3>
-          <p className="text-sm text-muted-foreground font-medium">Real-time air quality monitoring</p>
-        </div>
-      </div>
-
-      {/* Enhanced legend */}
-      <div className="absolute bottom-6 left-6 z-10 space-y-2">
-        <div className="glass-effect rounded-xl p-4 border border-border/30">
-          <p className="text-xs font-semibold text-foreground mb-3 uppercase tracking-wide">AQI Levels</p>
-          <div className="space-y-2 text-xs font-medium">
-            <div className="flex items-center gap-3">
-              <div className="w-3 h-3 rounded-full bg-red-500 shadow-lg shadow-red-500/50"></div>
-              <span className="text-foreground/80">Critical (200+)</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-3 h-3 rounded-full bg-orange-500 shadow-lg shadow-orange-500/50"></div>
-              <span className="text-foreground/80">High (100-200)</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="w-3 h-3 rounded-full bg-yellow-500 shadow-lg shadow-yellow-500/50"></div>
-              <span className="text-foreground/80">Moderate (0-100)</span>
-            </div>
+        <div className="space-y-0.5">
+          <h3 className="text-xl font-bold tracking-tight">Environmental Spatial Intelligence</h3>
+          <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-widest">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
+            Live Network Operational
           </div>
         </div>
       </div>
 
-      {/* Enhanced controls */}
-      <div className="absolute right-6 top-6 flex flex-col gap-3 z-10">
-        <button className="w-12 h-12 rounded-xl glass-effect border border-border/40 text-foreground hover:border-primary/50 hover:text-primary transition-all flex items-center justify-center font-bold text-lg hover:scale-110 duration-300 hover-glow">
-          +
-        </button>
-        <button className="w-12 h-12 rounded-xl glass-effect border border-border/40 text-foreground hover:border-primary/50 hover:text-primary transition-all flex items-center justify-center font-bold text-lg hover:scale-110 duration-300 hover-glow">
-          −
-        </button>
-        <button className="w-12 h-12 rounded-xl glass-effect border border-border/40 text-foreground hover:border-primary/50 hover:text-primary transition-all flex items-center justify-center text-lg hover:scale-110 duration-300 hover-glow">
-          📍
-        </button>
+      {/* Map Controls */}
+      <div className="absolute right-8 top-8 flex flex-col gap-3 z-10">
+        {[
+          { icon: <Maximize2 size={18} />, label: "Zoom In" },
+          { icon: <Minimize2 size={18} />, label: "Zoom Out" },
+          { icon: <Layers size={18} />, label: "Layers" },
+          { icon: <Navigation size={18} />, label: "Recenter" },
+        ].map((control, i) => (
+          <button 
+            key={i}
+            className="w-12 h-12 rounded-2xl glass-morphism-strong border border-white/10 flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 transition-all duration-300 hover:scale-110"
+          >
+            {control.icon}
+          </button>
+        ))}
       </div>
 
-      {/* Status indicator */}
-      <div className="absolute top-6 right-24 z-10">
-        <div className="flex items-center gap-2 px-4 py-2 rounded-xl glass-effect border border-border/30">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-glow-pulse"></div>
-          <span className="text-xs font-semibold text-foreground uppercase tracking-wide">Live</span>
+      {/* Legend */}
+      <div className="absolute bottom-8 left-8 z-10">
+        <div className="glass-morphism-strong rounded-2xl p-5 border border-white/10 space-y-4">
+          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">Network Legend</div>
+          <div className="space-y-2.5">
+            {[
+              { color: "#f87171", label: "Hazardous / Severe" },
+              { color: "#fbbf24", label: "Moderate Risk" },
+              { color: "#34d399", label: "Optimal / Safe" },
+            ].map((item, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color, boxShadow: `0 0 8px ${item.color}` }} />
+                <span className="text-xs font-semibold text-foreground/80">{item.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Status Overlay */}
+      <div className="absolute bottom-8 right-8 z-10">
+        <div className="px-4 py-2 rounded-xl glass-morphism border border-white/10 text-[10px] font-bold uppercase tracking-widest text-primary">
+          Layer: {selectedPollutant.toUpperCase()} Intensity
         </div>
       </div>
     </div>

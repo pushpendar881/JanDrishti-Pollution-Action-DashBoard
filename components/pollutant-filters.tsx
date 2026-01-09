@@ -1,5 +1,8 @@
 "use client"
 
+import { motion } from "framer-motion"
+import { Search, Info } from "lucide-react"
+
 interface Pollutant {
   id: string
   label: string
@@ -14,49 +17,48 @@ interface PollutantFiltersProps {
 
 export default function PollutantFilters({ pollutants, selectedPollutant, onSelectPollutant }: PollutantFiltersProps) {
   return (
-    <div className="space-y-4 animate-fade-slide-in" style={{ animationDelay: "0.25s" }}>
-      <div className="flex items-center gap-4 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center border border-primary/20">
-          <span className="text-xl">🔍</span>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/20">
+            <Search size={20} className="text-primary" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold">Parameter Focus</h3>
+            <p className="text-sm text-muted-foreground">Isolate specific pollutants for detailed spatial analysis</p>
+          </div>
         </div>
-        <div>
-          <h3 className="text-lg font-bold text-foreground">Pollutant Analysis</h3>
-          <p className="text-sm text-muted-foreground">Select pollutant type to analyze</p>
-        </div>
+        <button className="hidden sm:flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors">
+          <Info size={14} />
+          What are these?
+        </button>
       </div>
       
-      <div className="flex flex-wrap gap-4">
-        {pollutants.map((pollutant, index) => (
+      <div className="flex flex-wrap gap-3">
+        {pollutants.map((pollutant) => (
           <button
             key={pollutant.id}
             onClick={() => onSelectPollutant(pollutant.id)}
-            style={{ animationDelay: `${0.1 + index * 0.05}s` }}
-            className={`px-6 py-3 rounded-2xl font-semibold transition-all duration-300 cursor-pointer transform hover:scale-105 animate-scale-in border ${
+            className={`relative px-6 py-3.5 rounded-2xl font-bold transition-all duration-300 overflow-hidden group ${
               selectedPollutant === pollutant.id
-                ? `text-white shadow-xl hover-glow border-transparent`
-                : "glass-effect border-border/40 text-foreground/80 hover:border-primary/40 hover:text-foreground hover:glass-effect"
+                ? "text-primary-foreground"
+                : "text-muted-foreground glass-morphism border border-white/5 hover:border-white/20 hover:text-foreground"
             }`}
-            style={
-              selectedPollutant === pollutant.id
-                ? {
-                    backgroundImage: `linear-gradient(135deg, ${pollutant.color}, ${pollutant.color}dd)`,
-                    animationDelay: `${0.1 + index * 0.05}s`,
-                    boxShadow: `0 8px 32px ${pollutant.color}40`
-                  }
-                : { animationDelay: `${0.1 + index * 0.05}s` }
-            }
           >
-            <span className="flex items-center gap-3">
-              {selectedPollutant === pollutant.id && (
-                <span className="text-lg animate-glow-pulse">✓</span>
-              )}
-              <span className="font-bold">{pollutant.label}</span>
-              {selectedPollutant !== pollutant.id && (
-                <div 
-                  className="w-3 h-3 rounded-full opacity-60" 
-                  style={{ backgroundColor: pollutant.color }}
-                ></div>
-              )}
+            {selectedPollutant === pollutant.id && (
+              <motion.div
+                layoutId="activePollutant"
+                className="absolute inset-0 z-0"
+                style={{ backgroundColor: pollutant.color }}
+                transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+              />
+            )}
+            <span className="relative z-10 flex items-center gap-3">
+              <span className="w-2 h-2 rounded-full" style={{ 
+                backgroundColor: selectedPollutant === pollutant.id ? 'white' : pollutant.color,
+                boxShadow: selectedPollutant === pollutant.id ? 'none' : `0 0 8px ${pollutant.color}`
+              }} />
+              {pollutant.label}
             </span>
           </button>
         ))}

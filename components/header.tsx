@@ -1,5 +1,9 @@
 "use client"
 
+import { useState, useEffect } from "react"
+import { motion } from "framer-motion"
+import { MapPin, Building2, Bell, Search, Menu, User } from "lucide-react"
+
 interface HeaderProps {
   selectedCity: string
   setSelectedCity: (city: string) => void
@@ -8,6 +12,14 @@ interface HeaderProps {
 }
 
 export default function Header({ selectedCity, setSelectedCity, selectedWard, setSelectedWard }: HeaderProps) {
+  const [isScrolled, setIsScrolled] = useState(false)
+
+  useEffect(() => {
+    const handleScroll = () => setIsScrolled(window.scrollY > 20)
+    window.addEventListener("scroll", handleScroll)
+    return () => window.removeEventListener("scroll", handleScroll)
+  }, [])
+
   const cities = [
     { id: "new-delhi", name: "New Delhi", emoji: "📍" },
     { id: "mumbai", name: "Mumbai", emoji: "📍" },
@@ -25,84 +37,99 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
   const filteredWards = wards.filter(ward => ward.city === selectedCity)
 
   return (
-    <header className="border-b border-border/30 backdrop-blur-xl sticky top-0 z-20 glass-effect animate-slide-in-left">
-      <div className="container mx-auto px-6 py-5 flex items-center justify-between">
-        <div className="flex items-center gap-8">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white font-bold text-lg animate-smooth-glow">
-              A
+    <header 
+      className={`sticky top-0 z-50 transition-all duration-500 ${
+        isScrolled 
+          ? "py-3 glass-morphism-strong border-b border-white/10" 
+          : "py-6 bg-transparent"
+      }`}
+    >
+      <div className="container-px flex items-center justify-between">
+        <div className="flex items-center gap-12">
+          {/* Logo */}
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="flex items-center gap-3 group cursor-pointer"
+          >
+            <div className="relative">
+              <div className="w-10 h-10 rounded-xl grad-primary flex items-center justify-center text-primary-foreground font-bold text-xl shadow-[0_0_20px_rgba(56,189,248,0.3)] group-hover:scale-110 transition-transform duration-300">
+                J
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background animate-pulse" />
             </div>
             <div>
-              <div className="text-2xl font-bold tracking-tight text-foreground">JanDrishti</div>
-              <div className="text-xs text-muted-foreground font-medium">Professional Monitor</div>
+              <div className="text-xl font-bold tracking-tight text-foreground flex items-center gap-1">
+                JanDrishti
+                <span className="text-primary text-[10px] font-black uppercase tracking-[0.2em] px-1.5 py-0.5 rounded-md bg-primary/10 border border-primary/20">Pro</span>
+              </div>
+              <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-[0.1em]">Environmental Intelligence</div>
+            </div>
+          </motion.div>
+
+          {/* Navigation */}
+          <nav className="hidden lg:flex items-center gap-8">
+            {["Insights", "Network", "Policy", "Forecast"].map((item) => (
+              <a 
+                key={item}
+                href="#" 
+                className="text-sm font-semibold text-muted-foreground hover:text-primary transition-colors relative group"
+              >
+                {item}
+                <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full" />
+              </a>
+            ))}
+          </nav>
+        </div>
+
+        <div className="flex items-center gap-4">
+          {/* Locality Selectors */}
+          <div className="hidden md:flex items-center gap-2 p-1 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors group cursor-pointer">
+              <MapPin size={14} className="text-primary group-hover:animate-bounce" />
+              <select
+                value={selectedCity}
+                onChange={(e) => setSelectedCity(e.target.value)}
+                className="bg-transparent text-sm font-bold text-foreground outline-none cursor-pointer"
+              >
+                {cities.map((city) => (
+                  <option key={city.id} value={city.id} className="bg-slate-900">
+                    {city.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="w-px h-4 bg-white/10" />
+
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors group cursor-pointer">
+              <Building2 size={14} className="text-accent group-hover:animate-bounce" />
+              <select
+                value={selectedWard}
+                onChange={(e) => setSelectedWard(e.target.value)}
+                className="bg-transparent text-sm font-bold text-foreground outline-none cursor-pointer"
+              >
+                {filteredWards.map((ward) => (
+                  <option key={ward.id} value={ward.id} className="bg-slate-900">
+                    {ward.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-          {/* <nav className="hidden md:flex items-center gap-8">
-            <a
-              href="#"
-              className="text-sm font-medium text-foreground/80 hover:text-primary transition-all duration-300 hover-lift relative group"
-            >
-              Dashboard
-              <div className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full"></div>
-            </a>
-            <a
-              href="#"
-              className="text-sm font-medium text-foreground/80 hover:text-primary transition-all duration-300 hover-lift relative group"
-            >
-              Analytics
-              <div className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full"></div>
-            </a>
-            <a
-              href="#"
-              className="text-sm font-medium text-foreground/80 hover:text-primary transition-all duration-300 hover-lift relative group"
-            >
-              Resources
-              <div className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full"></div>
-            </a>
-          </nav> */}
-        </div>
 
-        <div className="hidden sm:flex items-center gap-3">
-          <button className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-all duration-300 hover:scale-105 hover-glow backdrop-blur-sm">
-            AQI (US)
-          </button>
-          <button className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-muted/20 text-foreground/70 border border-muted/30 hover:bg-muted/30 transition-all duration-300 hover:scale-105 backdrop-blur-sm">
-            PM2.5
-          </button>
-          <button className="px-5 py-2.5 text-sm font-semibold rounded-xl bg-muted/20 text-foreground/70 border border-muted/30 hover:bg-muted/30 transition-all duration-300 hover:scale-105 backdrop-blur-sm">
-            PM10
-          </button>
-        </div>
-
-        <div className="flex items-center gap-4 animate-slide-in-right">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-xl glass-effect border border-border/30">
-            <span className="text-primary text-lg">🏙️</span>
-            <select
-              value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
-              className="bg-transparent text-foreground outline-none cursor-pointer font-semibold text-sm transition-colors duration-300 hover:text-primary"
-            >
-              {cities.map((city) => (
-                <option key={city.id} value={city.id} className="bg-card text-foreground">
-                  {city.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          <div className="flex items-center gap-2 px-4 py-2 rounded-xl glass-effect border border-border/30">
-            <span className="text-accent text-lg">🏘️</span>
-            <select
-              value={selectedWard}
-              onChange={(e) => setSelectedWard(e.target.value)}
-              className="bg-transparent text-foreground outline-none cursor-pointer font-semibold text-sm transition-colors duration-300 hover:text-accent"
-            >
-              {filteredWards.map((ward) => (
-                <option key={ward.id} value={ward.id} className="bg-card text-foreground">
-                  {ward.name}
-                </option>
-              ))}
-            </select>
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2">
+            <button className="p-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all text-muted-foreground hover:text-primary">
+              <Bell size={18} />
+            </button>
+            <button className="hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-xl grad-primary text-primary-foreground font-bold text-sm hover:scale-105 transition-all shadow-lg shadow-primary/20">
+              <User size={16} />
+              Console
+            </button>
+            <button className="lg:hidden p-2.5 rounded-xl bg-white/5 border border-white/10 text-foreground">
+              <Menu size={18} />
+            </button>
           </div>
         </div>
       </div>
