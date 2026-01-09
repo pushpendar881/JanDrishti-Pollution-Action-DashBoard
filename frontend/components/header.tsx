@@ -2,8 +2,18 @@
 
 import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { MapPin, Building2, Bell, Search, Menu, User } from "lucide-react"
+import { MapPin, Building2, Bell, Menu, User } from "lucide-react"
 import { ModeToggle } from "./mode-toggle"
+import { useAuth } from "@/context/auth-context"
+import AuthDialog from "@/components/auth-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 interface HeaderProps {
   selectedCity: string
@@ -14,6 +24,8 @@ interface HeaderProps {
 
 export default function Header({ selectedCity, setSelectedCity, selectedWard, setSelectedWard }: HeaderProps) {
   const [isScrolled, setIsScrolled] = useState(false)
+  const { isAuthenticated, user, logout } = useAuth()
+  const [showAuthDialog, setShowAuthDialog] = useState(false)
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20)
@@ -38,17 +50,16 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
   const filteredWards = wards.filter(ward => ward.city === selectedCity)
 
   return (
-    <header 
-      className={`sticky top-0 z-50 transition-all duration-500 ${
-        isScrolled 
-          ? "py-3 glass-morphism-strong border-b" 
-          : "py-6 bg-transparent"
-      }`}
+    <header
+      className={`sticky top-0 z-50 transition-all duration-500 ${isScrolled
+        ? "py-3 glass-morphism-strong border-b"
+        : "py-6 bg-transparent"
+        }`}
     >
       <div className="container-px flex items-center justify-between">
         <div className="flex items-center gap-12">
           {/* Logo */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             className="flex items-center gap-3 group cursor-pointer"
@@ -71,9 +82,9 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
           {/* Navigation */}
           <nav className="hidden lg:flex items-center gap-8">
             {["Insights", "Network", "Policy", "Forecast"].map((item) => (
-              <a 
+              <a
                 key={item}
-                href="#" 
+                href="#"
                 className="text-sm font-semibold text-muted-foreground hover:text-primary transition-colors relative group"
               >
                 {item}
@@ -100,7 +111,7 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
                 ))}
               </select>
             </div>
-            
+
             <div className="w-px h-4 bg-border" />
 
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/50 transition-colors group cursor-pointer">
@@ -126,16 +137,72 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
               <Bell size={18} />
             </button>
 
-          <button className="hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-xl grad-primary text-primary-foreground font-bold text-sm hover:scale-105 transition-all shadow-lg shadow-primary/20">
-            <User size={16} />
-            Console
-          </button>
-          <button className="lg:hidden p-2.5 rounded-xl bg-muted/30 border text-foreground">
-            <Menu size={18} />
-          </button>
+            {/* User Authentication */}
+            {isAuthenticated && user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-muted/30 border hover:bg-muted/50 transition-all hover:scale-105 group">
+                    <div className="w-8 h-8 rounded-full grad-primary flex items-center justify-center text-primary-foreground text-sm font-bold shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform">
+                      {user.email?.charAt(0).toUpperCase() || "U"}
+                    </div>
+                    {/* <span className="text-sm font-bold text-foreground hidden sm:inline">
+                      {user.full_name || user.email?.split("@")[0]}
+                    </span> */}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 glass-morphism border">
+                  <DropdownMenuLabel>
+                    <div className="flex flex-col">
+                      <span className="font-bold">{user.full_name || "User"}</span>
+                      <span className="text-xs text-muted-foreground">{user.email}</span>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="cursor-pointer hover:bg-muted/50">
+                    Profile Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="cursor-pointer hover:bg-muted/50">
+                    My Reports
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={logout}
+                    className="text-red-400 cursor-pointer hover:text-red-300 hover:bg-red-500/10"
+                  >
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <>
+                {/* Desktop Login Button */}
+                <button
+                  onClick={() => setShowAuthDialog(true)}
+                  className="hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-xl grad-primary text-primary-foreground font-bold text-sm hover:scale-105 transition-all shadow-lg shadow-primary/20"
+                >
+                  <User size={16} />
+                  Login
+                </button>
+
+                {/* Mobile Login Button */}
+                <button
+                  onClick={() => setShowAuthDialog(true)}
+                  className="sm:hidden p-2.5 rounded-xl grad-primary text-primary-foreground hover:scale-105 transition-all shadow-lg shadow-primary/20"
+                >
+                  <User size={18} />
+                </button>
+              </>
+            )}
+
+            <button className="lg:hidden p-2.5 rounded-xl bg-muted/30 border text-foreground">
+              <Menu size={18} />
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Auth Dialog */}
+      <AuthDialog open={showAuthDialog} onOpenChange={setShowAuthDialog} />
     </header>
   )
 }
