@@ -14,6 +14,7 @@ from supabase import create_client, Client
 from jose import JWTError, jwt
 from groq import Groq
 from aqi_scheduler import get_scheduler
+from chat_cache import get_chat_cache
 
 
 load_dotenv()
@@ -178,9 +179,16 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         )
 
 # AI Helper Functions
-async def generate_ai_response(user_message: str, user_context: dict = None) -> str:
-    """Generate AI response using Groq API"""
+async def generate_ai_response(user_message: str, user_id: str = None, user_context: dict = None) -> str:
+    """Generate AI response using Groq API with conversation context from Redis"""
     try:
+        chat_cache = get_chat_cache()
+        
+        # Get conversation context from Redis (last 5 messages for context)
+        conversation_context = []
+        if user_id:
+            conversation_context = chat_cache.get_conversation_context(user_id, max_messages=5)
+        
         # Create a context-aware system prompt for pollution monitoring
         system_prompt = """You are an AI assistant for JanDrishti, a pollution monitoring and environmental intelligence platform. 
         You help users understand air quality data, provide health recommendations, explain government policies, and offer guidance on pollution-related issues.
@@ -202,18 +210,22 @@ async def generate_ai_response(user_message: str, user_context: dict = None) -> 
         if user_context:
             context_info = f"\nUser context: {user_context.get('location', 'Unknown location')}"
         
+        # Build messages array with conversation history
+        messages = [{"role": "system", "content": system_prompt + context_info}]
+        
+        # Add conversation context from Redis
+        for msg in conversation_context:
+            if msg.get("user_message"):
+                messages.append({"role": "user", "content": msg["user_message"]})
+            if msg.get("bot_response"):
+                messages.append({"role": "assistant", "content": msg["bot_response"]})
+        
+        # Add current user message
+        messages.append({"role": "user", "content": user_message})
+        
         # Create the chat completion
         chat_completion = groq_client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt + context_info
-                },
-                {
-                    "role": "user",
-                    "content": user_message
-                }
-            ],
+            messages=messages,
             model="llama-3.3-70b-versatile",
             temperature=0.7,
             max_tokens=500,
@@ -462,18 +474,42 @@ async def get_chat_messages(
     offset: int = 0,
     current_user = Depends(get_current_user)
 ):
-    """Get chat message history (requires authentication)"""
+    """
+    Get chat message history (requires authentication)
+    Uses Redis cache for fast retrieval, falls back to Supabase if cache miss
+    """
     try:
+        chat_cache = get_chat_cache()
+        
+        # Try to get from Redis cache first
+        cached_messages = chat_cache.get_cached_messages(current_user.id, limit=limit + offset)
+        
+        if cached_messages and len(cached_messages) >= limit:
+            # Return cached messages (already sorted by newest first)
+            return cached_messages[:limit]
+        
+        # Cache miss or insufficient data - fetch from Supabase
         response = supabase.table("chat_messages")\
             .select("*")\
             .eq("user_id", current_user.id)\
             .order("created_at", desc=True)\
-            .limit(limit)\
-            .offset(offset)\
+            .limit(limit + offset)\
             .execute()
         
-        return response.data
+        messages = response.data
+        
+        # Cache the messages in Redis for future requests
+        if messages:
+            chat_cache.cache_messages_batch(current_user.id, messages)
+        
+        # Update user session
+        chat_cache.update_session(current_user.id)
+        
+        # Return requested slice
+        return messages[offset:offset + limit] if offset > 0 else messages[:limit]
+        
     except Exception as e:
+        print(f"Error getting chat messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/chat/messages", response_model=ChatMessageResponse, status_code=status.HTTP_201_CREATED)
@@ -481,30 +517,81 @@ async def create_chat_message(
     message: ChatMessageCreate,
     current_user = Depends(get_current_user)
 ):
-    """Send a chat message (requires authentication)"""
+    """
+    Send a chat message (requires authentication)
+    Uses Redis for rate limiting, caching, and conversation context
+    """
     try:
-        # Generate AI response
+        chat_cache = get_chat_cache()
+        
+        # Check rate limit
+        is_allowed, remaining = chat_cache.check_rate_limit(current_user.id)
+        if not is_allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded. Please wait before sending another message. You can send {remaining} more messages."
+            )
+        
+        # Update user session
+        chat_cache.update_session(current_user.id)
+        
+        # Generate AI response with conversation context
         ai_response = await generate_ai_response(
             user_message=message.message,
+            user_id=current_user.id,
             user_context={"location": "Unknown location"}
         )
         
-        # Save conversation pair
+        # Prepare message data
         message_data = {
             "user_id": current_user.id,
             "user_message": message.message,
-            "bot_response": ai_response
+            "bot_response": ai_response,
+            "created_at": datetime.utcnow().isoformat()
         }
         
+        # Save to Supabase (primary storage)
         response = supabase.table("chat_messages").insert(message_data).execute()
+        saved_message = response.data[0]
         
-        # Return the saved data directly from database
-        return response.data[0]
+        # Cache in Redis immediately for fast retrieval
+        chat_cache.cache_message(current_user.id, saved_message)
         
+        # Return the saved data
+        return saved_message
+        
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error in create_chat_message: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/chat/rate-limit")
+async def get_rate_limit_status(current_user = Depends(get_current_user)):
+    """Get current rate limit status for the user"""
+    try:
+        chat_cache = get_chat_cache()
+        is_allowed, remaining = chat_cache.check_rate_limit(current_user.id)
+        
+        return {
+            "allowed": is_allowed,
+            "remaining": remaining,
+            "limit": 10,
+            "window_seconds": 60
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/chat/cache")
+async def clear_chat_cache(current_user = Depends(get_current_user)):
+    """Clear user's chat cache (admin or own cache only)"""
+    try:
+        chat_cache = get_chat_cache()
+        chat_cache.invalidate_user_cache(current_user.id)
+        return {"message": "Chat cache cleared successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # AQI Endpoints
 WAQI_TOKEN = "62fbeb618094ae4ec793918f91392c3716055dab"
