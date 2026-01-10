@@ -40,6 +40,11 @@ class AQIScheduler:
                 replace_existing=True
             )
             
+            # Trigger initial data collection immediately on startup
+            # This ensures data is available right away
+            logger.info("Triggering initial AQI data collection on startup...")
+            self._fetch_hourly_data()
+            
             # Job 2: Calculate and store daily averages at 12:00 AM IST (midnight IST)
             self.scheduler.add_job(
                 func=self._calculate_daily_averages,

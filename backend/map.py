@@ -48,7 +48,8 @@ bounds = wards.total_bounds
 # ------------------------------------------------------
 # WAQI API
 # ------------------------------------------------------
-WAQI_TOKEN = "62fbeb618094ae4ec793918f91392c3716055dab"
+import os
+WAQI_TOKEN = os.getenv("WAQI_API_TOKEN", "62fbeb618094ae4ec793918f91392c3716055dab")  # Fallback for backward compatibility
 
 if WAQI_TOKEN == "YOUR_WAQI_TOKEN_HERE":
     print("\n⚠️  ERROR: Please add your WAQI API token!")

@@ -1,101 +1,331 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from "recharts"
+import { aqiService } from "@/lib/api"
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, Info, Wind, Car, Factory, Construction, Leaf, Sun, Cloud, Droplets } from "lucide-react"
 
 interface AIForecastProps {
   selectedWard: string
 }
 
 export default function AIForecast({ selectedWard }: AIForecastProps) {
-  const [forecastPeriod, setForecastPeriod] = useState<string>("24h")
   const [selectedMetric, setSelectedMetric] = useState<string>("aqi")
-
-  const forecastPeriods = [
-    { id: "24h", label: "24 Hours", icon: "🕐" },
-    { id: "7d", label: "7 Days", icon: "📅" },
-    { id: "30d", label: "30 Days", icon: "📊" },
-  ]
+  const [forecastData, setForecastData] = useState<any[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [error, setError] = useState<string | null>(null)
+  const [confidence, setConfidence] = useState<number>(0)
+  const [trend, setTrend] = useState<string>("stable")
+  const [patterns, setPatterns] = useState<any>(null)
+  const [causes, setCauses] = useState<any[]>([])
 
   const metrics = [
-    { id: "aqi", label: "AQI", color: "#3b82f6" },
-    { id: "pm25", label: "PM2.5", color: "#06b6d4" },
-    { id: "pm10", label: "PM10", color: "#10b981" },
-    { id: "no2", label: "NO2", color: "#8b5cf6" },
+    { id: "aqi", label: "AQI", color: "#3b82f6", icon: "🌡️" },
+    { id: "pm25", label: "PM2.5", color: "#06b6d4", icon: "💨" },
+    { id: "pm10", label: "PM10", color: "#10b981", icon: "🌫️" },
+    { id: "no2", label: "NO2", color: "#8b5cf6", icon: "⚗️" },
+    { id: "o3", label: "O3", color: "#14b8a6", icon: "☀️" },
   ]
 
-  // Dummy forecast data
-  const hourlyForecast = [
-    { time: "00:00", aqi: 180, pm25: 95, pm10: 160, no2: 45, confidence: 92 },
-    { time: "03:00", aqi: 175, pm25: 90, pm10: 155, no2: 42, confidence: 89 },
-    { time: "06:00", aqi: 195, pm25: 105, pm10: 175, no2: 48, confidence: 94 },
-    { time: "09:00", aqi: 220, pm25: 125, pm10: 195, no2: 55, confidence: 91 },
-    { time: "12:00", aqi: 210, pm25: 115, pm10: 185, no2: 52, confidence: 88 },
-    { time: "15:00", aqi: 200, pm25: 110, pm10: 180, no2: 50, confidence: 90 },
-    { time: "18:00", aqi: 230, pm25: 135, pm10: 205, no2: 58, confidence: 87 },
-    { time: "21:00", aqi: 215, pm25: 120, pm10: 190, no2: 53, confidence: 89 },
-  ]
-
-  const weeklyForecast = [
-    { day: "Mon", aqi: 195, pm25: 105, pm10: 175, no2: 48, confidence: 85 },
-    { day: "Tue", aqi: 210, pm25: 115, pm10: 185, no2: 52, confidence: 82 },
-    { day: "Wed", aqi: 185, pm25: 95, pm10: 165, no2: 45, confidence: 88 },
-    { day: "Thu", aqi: 175, pm25: 90, pm10: 155, no2: 42, confidence: 90 },
-    { day: "Fri", aqi: 200, pm25: 110, pm10: 180, no2: 50, confidence: 86 },
-    { day: "Sat", aqi: 165, pm25: 85, pm10: 145, no2: 40, confidence: 91 },
-    { day: "Sun", aqi: 155, pm25: 80, pm10: 135, no2: 38, confidence: 93 },
-  ]
-
-  const getCurrentData = () => {
-    return forecastPeriod === "24h" ? hourlyForecast : weeklyForecast
+  // Extract ward number
+  const getWardNumber = (wardId: string): string | null => {
+    if (!wardId) return null
+    if (wardId.startsWith("ward-")) {
+      return wardId.replace("ward-", "")
+    }
+    return wardId
   }
 
-  const factors = [
-    { name: "Weather Patterns", impact: 85, trend: "improving", icon: "🌤️" },
-    { name: "Traffic Volume", impact: 72, trend: "worsening", icon: "🚗" },
-    { name: "Industrial Activity", impact: 68, trend: "stable", icon: "🏭" },
-    { name: "Construction Work", impact: 45, trend: "improving", icon: "🏗️" },
-    { name: "Seasonal Factors", impact: 91, trend: "worsening", icon: "🍂" },
-  ]
+  useEffect(() => {
+    const fetchForecast = async () => {
+      if (!selectedWard) {
+        setLoading(false)
+        return
+      }
 
-  const recommendations = [
-    {
-      type: "immediate",
-      title: "Immediate Actions (Next 6 hours)",
-      items: [
-        "Avoid outdoor activities between 6-10 AM",
-        "Use N95 masks if going outside",
-        "Keep windows closed during peak hours",
-        "Use air purifiers indoors"
-      ],
-      icon: "⚡",
-      color: "red"
-    },
-    {
-      type: "short-term",
-      title: "Short-term Measures (24-48 hours)",
-      items: [
-        "Implement odd-even vehicle restrictions",
-        "Increase public transport frequency",
-        "Suspend construction activities",
-        "Deploy water sprinklers on roads"
-      ],
-      icon: "📋",
-      color: "orange"
-    },
-    {
-      type: "long-term",
-      title: "Long-term Strategy (This week)",
-      items: [
-        "Monitor industrial emissions closely",
-        "Increase green cover in the area",
-        "Promote work-from-home policies",
-        "Enhance public awareness campaigns"
-      ],
-      icon: "🎯",
-      color: "blue"
+      setLoading(true)
+      setError(null)
+
+      try {
+        const wardNo = getWardNumber(selectedWard)
+        if (!wardNo) {
+          setError("Invalid ward selected")
+          setLoading(false)
+          return
+        }
+
+        const response = await aqiService.getForecast(
+          wardNo,
+          '24h',
+          selectedMetric as 'aqi' | 'pm25' | 'pm10' | 'no2' | 'o3'
+        )
+
+        if (response.forecast && response.forecast.length > 0) {
+          setForecastData(response.forecast)
+          setConfidence(response.confidence)
+          setTrend(response.trend)
+          
+          // Analyze patterns from forecast data
+          analyzePatterns(response.forecast, selectedMetric)
+          // Analyze causes
+          analyzeCauses(response.forecast, selectedMetric)
+        } else {
+          setError("No forecast data available")
+        }
+      } catch (err: any) {
+        console.error("Error fetching forecast:", err)
+        setError(err.response?.data?.detail || err.message || "Failed to load forecast")
+      } finally {
+        setLoading(false)
+      }
     }
-  ]
+
+    fetchForecast()
+  }, [selectedWard, selectedMetric])
+
+  const analyzePatterns = (data: any[], metric: string) => {
+    if (!data.length) return
+
+    const values = data.map(d => d[metric] || 0)
+    const avg = values.reduce((a, b) => a + b, 0) / values.length
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const minIndex = values.indexOf(min)
+    const maxIndex = values.indexOf(max)
+
+    // Find peak hours
+    const peakHour = data[maxIndex]?.time || "N/A"
+    const cleanestHour = data[minIndex]?.time || "N/A"
+
+    // Calculate variation
+    const variation = ((max - min) / avg) * 100
+
+    // Determine pattern type
+    let patternType = "stable"
+    if (variation > 30) patternType = "highly_variable"
+    else if (variation > 15) patternType = "moderate_variable"
+    else patternType = "stable"
+
+    setPatterns({
+      average: avg,
+      minimum: min,
+      maximum: max,
+      peakHour,
+      cleanestHour,
+      variation: variation.toFixed(1),
+      patternType,
+      trend: trend
+    })
+  }
+
+  const analyzeCauses = (data: any[], metric: string) => {
+    if (!data.length) return
+
+    const values = data.map(d => d[metric] || 0)
+    const avg = values.reduce((a, b) => a + b, 0) / values.length
+    const max = Math.max(...values)
+
+    const causesList: any[] = []
+
+    // Determine pollution level
+    const isHigh = avg > (metric === 'aqi' ? 150 : metric === 'pm25' ? 55 : metric === 'pm10' ? 150 : metric === 'no2' ? 200 : 200)
+    const isVeryHigh = avg > (metric === 'aqi' ? 200 : metric === 'pm25' ? 75 : metric === 'pm10' ? 200 : metric === 'no2' ? 300 : 300)
+
+    // Traffic-related causes
+    if (isHigh) {
+      causesList.push({
+        icon: Car,
+        title: "Traffic Emissions",
+        description: "High vehicular traffic during peak hours contributes significantly to pollution",
+        impact: isVeryHigh ? 85 : 70,
+        color: "text-orange-400",
+        bgColor: "bg-orange-500/10",
+        borderColor: "border-orange-500/30",
+        details: [
+          "Rush hour traffic (8-10 AM, 6-8 PM)",
+          "Diesel vehicles emitting NO2 and PM",
+          "Congested roads with idling vehicles",
+          "Poor traffic flow increasing emissions"
+        ]
+      })
+    }
+
+    // Industrial causes
+    if (isHigh && (metric === 'pm25' || metric === 'pm10' || metric === 'aqi')) {
+      causesList.push({
+        icon: Factory,
+        title: "Industrial Activity",
+        description: "Nearby industrial zones and power plants release particulate matter",
+        impact: isVeryHigh ? 75 : 60,
+        color: "text-red-400",
+        bgColor: "bg-red-500/10",
+        borderColor: "border-red-500/30",
+        details: [
+          "Industrial emissions during working hours",
+          "Power plant operations",
+          "Construction material production",
+          "Waste incineration activities"
+        ]
+      })
+    }
+
+    // Construction causes
+    if (isHigh && (metric === 'pm10' || metric === 'pm25' || metric === 'aqi')) {
+      causesList.push({
+        icon: Construction,
+        title: "Construction & Demolition",
+        description: "Active construction sites generate dust and particulate matter",
+        impact: isVeryHigh ? 65 : 50,
+        color: "text-amber-400",
+        bgColor: "bg-amber-500/10",
+        borderColor: "border-amber-500/30",
+        details: [
+          "Dust from construction sites",
+          "Demolition activities",
+          "Unpaved roads near construction",
+          "Material transportation"
+        ]
+      })
+    }
+
+    // Weather-related causes
+    if (isHigh) {
+      causesList.push({
+        icon: Cloud,
+        title: "Weather Conditions",
+        description: "Stagnant air and low wind speed trap pollutants near the ground",
+        impact: isVeryHigh ? 80 : 65,
+        color: "text-blue-400",
+        bgColor: "bg-blue-500/10",
+        borderColor: "border-blue-500/30",
+        details: [
+          "Low wind speed preventing dispersion",
+          "Temperature inversion trapping pollutants",
+          "High humidity increasing particle formation",
+          "Lack of rainfall to wash pollutants"
+        ]
+      })
+    }
+
+    // Seasonal causes
+    if (isHigh) {
+      causesList.push({
+        icon: Leaf,
+        title: "Seasonal Factors",
+        description: "Winter conditions and crop burning contribute to pollution spikes",
+        impact: isVeryHigh ? 70 : 55,
+        color: "text-purple-400",
+        bgColor: "bg-purple-500/10",
+        borderColor: "border-purple-500/30",
+        details: [
+          "Crop residue burning in nearby areas",
+          "Winter inversion layer",
+          "Festival firecrackers (if applicable)",
+          "Reduced vegetation cover"
+        ]
+      })
+    }
+
+    // Low pollution indicators
+    if (!isHigh) {
+      causesList.push({
+        icon: CheckCircle,
+        title: "Favorable Conditions",
+        description: "Current conditions are helping maintain lower pollution levels",
+        impact: 90,
+        color: "text-green-400",
+        bgColor: "bg-green-500/10",
+        borderColor: "border-green-500/30",
+        details: [
+          "Good wind speed dispersing pollutants",
+          "Recent rainfall cleaning the air",
+          "Reduced traffic during off-peak hours",
+          "Effective pollution control measures"
+        ]
+      })
+    }
+
+    setCauses(causesList)
+  }
+
+  const getTrendIcon = () => {
+    if (trend === "increasing") return <TrendingUp className="w-5 h-5 text-red-400" />
+    if (trend === "decreasing") return <TrendingDown className="w-5 h-5 text-green-400" />
+    return <Minus className="w-5 h-5 text-yellow-400" />
+  }
+
+  const getSuggestions = () => {
+    if (!forecastData.length || !patterns) return []
+
+    const avg = patterns.average
+    const isHigh = avg > (selectedMetric === 'aqi' ? 150 : selectedMetric === 'pm25' ? 55 : selectedMetric === 'pm10' ? 150 : 200)
+    
+    const suggestions = []
+
+    if (isHigh) {
+      suggestions.push({
+        type: "immediate",
+        icon: "⚡",
+        title: "Immediate Actions",
+        color: "from-red-500/20 to-orange-500/20",
+        borderColor: "border-red-500/30",
+        items: [
+          `Avoid outdoor activities between ${patterns.peakHour}`,
+          "Use N95 masks if going outside",
+          "Keep windows and doors closed",
+          "Use air purifiers indoors",
+          "Stay hydrated and limit physical exertion"
+        ]
+      })
+
+      suggestions.push({
+        type: "short-term",
+        icon: "📋",
+        title: "Short-term Measures",
+        color: "from-orange-500/20 to-amber-500/20",
+        borderColor: "border-orange-500/30",
+        items: [
+          "Plan outdoor activities during cleaner hours",
+          "Use public transport instead of personal vehicles",
+          "Avoid burning waste or using generators",
+          "Check air quality updates regularly",
+          "Keep indoor plants to improve air quality"
+        ]
+      })
+
+      suggestions.push({
+        type: "long-term",
+        icon: "🎯",
+        title: "Long-term Strategy",
+        color: "from-blue-500/20 to-purple-500/20",
+        borderColor: "border-blue-500/30",
+        items: [
+          "Support green initiatives in your area",
+          "Reduce personal vehicle usage",
+          "Advocate for better public transport",
+          "Support tree plantation drives",
+          "Stay informed about pollution control policies"
+        ]
+      })
+    } else {
+      suggestions.push({
+        type: "maintain",
+        icon: "✅",
+        title: "Maintain Good Air Quality",
+        color: "from-green-500/20 to-emerald-500/20",
+        borderColor: "border-green-500/30",
+        items: [
+          "Continue using public transport",
+          "Support environmental initiatives",
+          "Maintain indoor air quality",
+          "Stay informed about air quality trends",
+          "Encourage community participation"
+        ]
+      })
+    }
+
+    return suggestions
+  }
 
   return (
     <div className="space-y-8">
@@ -106,7 +336,7 @@ export default function AIForecast({ selectedWard }: AIForecastProps) {
             <span className="text-2xl">🔮</span>
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-foreground">AI-Powered Pollution Forecast</h2>
+            <h2 className="text-2xl font-bold text-foreground">AI-Powered 24-Hour Forecast</h2>
             <p className="text-muted-foreground font-medium">Predictive analytics for proactive pollution management</p>
           </div>
         </div>
@@ -116,150 +346,207 @@ export default function AIForecast({ selectedWard }: AIForecastProps) {
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="flex flex-wrap gap-4">
-        <div className="flex gap-2">
-          {forecastPeriods.map((period) => (
-            <button
-              key={period.id}
-              onClick={() => setForecastPeriod(period.id)}
-              className={`px-4 py-2 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2 ${
-                forecastPeriod === period.id
-                  ? "bg-primary text-white shadow-lg"
-                  : "glass-effect border border-border/40 text-foreground/70 hover:text-foreground hover:border-primary/40"
-              }`}
-            >
-              <span>{period.icon}</span>
-              <span>{period.label}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="flex gap-2">
-          {metrics.map((metric) => (
-            <button
-              key={metric.id}
-              onClick={() => setSelectedMetric(metric.id)}
-              className={`px-4 py-2 rounded-xl font-semibold transition-all duration-300 ${
-                selectedMetric === metric.id
-                  ? "text-white shadow-lg"
-                  : "glass-effect border border-border/40 text-foreground/70 hover:text-foreground hover:border-primary/40"
-              }`}
-              style={selectedMetric === metric.id ? { backgroundColor: metric.color } : {}}
-            >
-              {metric.label}
-            </button>
-          ))}
-        </div>
+      {/* Metric Selector */}
+      <div className="flex flex-wrap gap-3">
+        {metrics.map((metric) => (
+          <button
+            key={metric.id}
+            onClick={() => setSelectedMetric(metric.id)}
+            className={`px-5 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2 ${
+              selectedMetric === metric.id
+                ? "text-white shadow-lg scale-105"
+                : "glass-effect border border-border/40 text-foreground/70 hover:text-foreground hover:border-primary/40"
+            }`}
+            style={selectedMetric === metric.id ? { backgroundColor: metric.color } : {}}
+          >
+            <span className="text-lg">{metric.icon}</span>
+            <span>{metric.label}</span>
+          </button>
+        ))}
       </div>
 
       {/* Main Forecast Chart */}
       <div className="rounded-3xl border border-border/40 glass-effect p-8">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-bold text-foreground">Pollution Forecast Trend</h3>
-          <div className="flex items-center gap-2 px-3 py-1 rounded-lg glass-effect border border-border/30">
-            <span className="text-green-400 text-sm">●</span>
-            <span className="text-xs font-semibold text-foreground">
-              {getCurrentData().reduce((acc, curr) => acc + curr.confidence, 0) / getCurrentData().length}% Confidence
-            </span>
+          <h3 className="text-xl font-bold text-foreground">24-Hour Forecast Trend</h3>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 px-3 py-1 rounded-lg glass-effect border border-border/30">
+              {getTrendIcon()}
+              <span className="text-xs font-semibold text-foreground capitalize">{trend}</span>
+            </div>
+            <div className="flex items-center gap-2 px-3 py-1 rounded-lg glass-effect border border-border/30">
+              <span className="text-green-400 text-sm">●</span>
+              <span className="text-xs font-semibold text-foreground">
+                {confidence.toFixed(1)}% Confidence
+              </span>
+            </div>
           </div>
         </div>
 
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={getCurrentData()}>
-              <defs>
-                <linearGradient id="colorAqi" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={metrics.find(m => m.id === selectedMetric)?.color} stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor={metrics.find(m => m.id === selectedMetric)?.color} stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
-              <XAxis 
-                dataKey={forecastPeriod === "24h" ? "time" : "day"} 
-                stroke="rgba(255,255,255,0.6)" 
-                style={{ fontSize: "12px", fontWeight: "500" }}
-              />
-              <YAxis stroke="rgba(255,255,255,0.6)" style={{ fontSize: "12px", fontWeight: "500" }} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "rgba(15, 20, 25, 0.95)",
-                  border: "1px solid rgba(59, 130, 246, 0.3)",
-                  borderRadius: "12px",
-                  boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
-                  backdropFilter: "blur(20px)",
-                }}
-                labelStyle={{ color: "#f1f5f9", fontWeight: "600" }}
-              />
-              <Area
-                type="monotone"
-                dataKey={selectedMetric}
-                stroke={metrics.find(m => m.id === selectedMetric)?.color}
-                strokeWidth={3}
-                fillOpacity={1}
-                fill="url(#colorAqi)"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+        {loading && (
+          <div className="h-80 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-muted-foreground">Generating AI forecast...</p>
+            </div>
+          </div>
+        )}
+
+        {error && !loading && (
+          <div className="h-80 flex items-center justify-center">
+            <div className="text-center max-w-md">
+              <div className="text-5xl mb-4">🔮</div>
+              <h3 className="text-xl font-bold text-yellow-400 mb-2">Forecast Unavailable</h3>
+              <p className="text-muted-foreground text-sm">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {!loading && !error && forecastData.length > 0 && (
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={forecastData}>
+                <defs>
+                  <linearGradient id="colorForecast" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={metrics.find(m => m.id === selectedMetric)?.color} stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor={metrics.find(m => m.id === selectedMetric)?.color} stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                <XAxis 
+                  dataKey="time" 
+                  stroke="rgba(255,255,255,0.6)" 
+                  style={{ fontSize: "12px", fontWeight: "500" }}
+                />
+                <YAxis stroke="rgba(255,255,255,0.6)" style={{ fontSize: "12px", fontWeight: "500" }} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "rgba(15, 20, 25, 0.95)",
+                    border: "1px solid rgba(59, 130, 246, 0.3)",
+                    borderRadius: "12px",
+                    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
+                    backdropFilter: "blur(20px)",
+                  }}
+                  labelStyle={{ color: "#f1f5f9", fontWeight: "600" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey={selectedMetric}
+                  stroke={metrics.find(m => m.id === selectedMetric)?.color}
+                  strokeWidth={3}
+                  fillOpacity={1}
+                  fill="url(#colorForecast)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
 
-      {/* Forecast Factors */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="rounded-3xl border border-border/40 glass-effect p-6">
-          <h3 className="text-xl font-bold text-foreground mb-6 flex items-center gap-3">
-            <span className="text-2xl">🎯</span>
-            Contributing Factors
-          </h3>
-          
-          <div className="space-y-4">
-            {factors.map((factor, index) => (
-              <div key={index} className="flex items-center justify-between p-4 rounded-xl glass-effect border border-border/30">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{factor.icon}</span>
-                  <div>
-                    <p className="font-semibold text-foreground">{factor.name}</p>
-                    <p className={`text-xs font-medium ${
-                      factor.trend === "improving" ? "text-green-400" : 
-                      factor.trend === "worsening" ? "text-red-400" : "text-yellow-400"
-                    }`}>
-                      {factor.trend === "improving" ? "↓" : factor.trend === "worsening" ? "↑" : "→"} {factor.trend}
-                    </p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-lg font-bold text-foreground">{factor.impact}%</p>
-                  <div className="w-16 h-2 bg-border/30 rounded-full mt-1">
-                    <div 
-                      className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
-                      style={{ width: `${factor.impact}%` }}
-                    ></div>
-                  </div>
-                </div>
+      {/* Patterns & Trends Section */}
+      {patterns && !loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="rounded-2xl border border-border/40 glass-effect p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                <span className="text-xl">📊</span>
               </div>
-            ))}
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">Average</p>
+                <p className="text-2xl font-bold text-foreground">{patterns.average.toFixed(1)}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border/40 glass-effect p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center">
+                <span className="text-xl">⬆️</span>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">Peak Hour</p>
+                <p className="text-2xl font-bold text-foreground">{patterns.peakHour}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border/40 glass-effect p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center">
+                <span className="text-xl">⬇️</span>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">Cleanest Hour</p>
+                <p className="text-2xl font-bold text-foreground">{patterns.cleanestHour}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border/40 glass-effect p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
+                <span className="text-xl">📈</span>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground font-semibold uppercase">Variation</p>
+                <p className="text-2xl font-bold text-foreground">{patterns.variation}%</p>
+              </div>
+            </div>
           </div>
         </div>
+      )}
 
-        {/* AI Recommendations */}
-        <div className="rounded-3xl border border-border/40 glass-effect p-6">
-          <h3 className="text-xl font-bold text-foreground mb-6 flex items-center gap-3">
-            <span className="text-2xl">🤖</span>
-            AI Recommendations
-          </h3>
+      {/* Causes Section - Interactive */}
+      {causes.length > 0 && !loading && (
+        <div className="rounded-3xl border border-border/40 glass-effect p-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500/20 to-red-500/20 flex items-center justify-center border border-orange-500/30">
+              <AlertTriangle className="w-6 h-6 text-orange-400" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-foreground">Pollution Causes</h3>
+              <p className="text-sm text-muted-foreground">Interactive analysis of contributing factors</p>
+            </div>
+          </div>
 
-          <div className="space-y-4">
-            {recommendations.map((rec, index) => (
-              <div key={index} className="rounded-xl glass-effect border border-border/30 p-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className={`w-8 h-8 rounded-lg bg-${rec.color}-500/20 flex items-center justify-center`}>
-                    <span className="text-lg">{rec.icon}</span>
-                  </div>
-                  <h4 className="font-bold text-foreground text-sm">{rec.title}</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {causes.map((cause, index) => {
+              const IconComponent = cause.icon
+              
+              return (
+                <CauseCard key={index} cause={cause} IconComponent={IconComponent} />
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Suggestions Section */}
+      {getSuggestions().length > 0 && !loading && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center border border-blue-500/30">
+              <Info className="w-6 h-6 text-blue-400" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-foreground">AI Recommendations</h3>
+              <p className="text-sm text-muted-foreground">Actionable suggestions based on forecast</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {getSuggestions().map((suggestion, index) => (
+              <div
+                key={index}
+                className={`rounded-2xl border ${suggestion.borderColor} bg-gradient-to-br ${suggestion.color} p-6`}
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="text-2xl">{suggestion.icon}</span>
+                  <h4 className="font-bold text-foreground">{suggestion.title}</h4>
                 </div>
-                <ul className="space-y-1">
-                  {rec.items.map((item, itemIndex) => (
-                    <li key={itemIndex} className="text-xs text-muted-foreground flex items-start gap-2">
+                <ul className="space-y-2">
+                  {suggestion.items.map((item: string, itemIndex: number) => (
+                    <li key={itemIndex} className="text-sm text-foreground/90 flex items-start gap-2">
                       <span className="text-primary mt-1">•</span>
                       <span>{item}</span>
                     </li>
@@ -269,36 +556,104 @@ export default function AIForecast({ selectedWard }: AIForecastProps) {
             ))}
           </div>
         </div>
-      </div>
+      )}
 
       {/* Accuracy Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="rounded-3xl border border-border/40 glass-effect p-6 text-center">
-          <div className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center mx-auto mb-3">
-            <span className="text-green-500 text-xl">🎯</span>
+      {!loading && forecastData.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="rounded-3xl border border-border/40 glass-effect p-6 text-center">
+            <div className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center mx-auto mb-3">
+              <span className="text-green-500 text-xl">🎯</span>
+            </div>
+            <h4 className="font-bold text-foreground mb-1">Forecast Confidence</h4>
+            <p className="text-3xl font-bold text-green-400">{confidence.toFixed(1)}%</p>
+            <p className="text-xs text-muted-foreground mt-1">AI prediction confidence</p>
           </div>
-          <h4 className="font-bold text-foreground mb-1">Forecast Accuracy</h4>
-          <p className="text-3xl font-bold text-green-400">94.2%</p>
-          <p className="text-xs text-muted-foreground mt-1">Last 30 days average</p>
-        </div>
 
-        <div className="rounded-3xl border border-border/40 glass-effect p-6 text-center">
-          <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center mx-auto mb-3">
-            <span className="text-blue-500 text-xl">⚡</span>
+          <div className="rounded-3xl border border-border/40 glass-effect p-6 text-center">
+            <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center mx-auto mb-3">
+              <span className="text-blue-500 text-xl">📊</span>
+            </div>
+            <h4 className="font-bold text-foreground mb-1">Data Points</h4>
+            <p className="text-3xl font-bold text-blue-400">{forecastData.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">24-hour predictions</p>
           </div>
-          <h4 className="font-bold text-foreground mb-1">Prediction Speed</h4>
-          <p className="text-3xl font-bold text-blue-400">0.3s</p>
-          <p className="text-xs text-muted-foreground mt-1">Real-time processing</p>
-        </div>
 
-        <div className="rounded-3xl border border-border/40 glass-effect p-6 text-center">
-          <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center mx-auto mb-3">
-            <span className="text-purple-500 text-xl">🧠</span>
+          <div className="rounded-3xl border border-border/40 glass-effect p-6 text-center">
+            <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center mx-auto mb-3">
+              {getTrendIcon()}
+            </div>
+            <h4 className="font-bold text-foreground mb-1">Trend</h4>
+            <p className="text-3xl font-bold text-purple-400 capitalize">{trend}</p>
+            <p className="text-xs text-muted-foreground mt-1">Predicted direction</p>
           </div>
-          <h4 className="font-bold text-foreground mb-1">Model Version</h4>
-          <p className="text-3xl font-bold text-purple-400">v2.1</p>
-          <p className="text-xs text-muted-foreground mt-1">Latest AI model</p>
         </div>
+      )}
+    </div>
+  )
+}
+
+// Separate component for cause cards with expandable state
+function CauseCard({ cause, IconComponent }: { cause: any, IconComponent: any }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  return (
+    <div
+      className={`rounded-2xl border ${cause.borderColor} ${cause.bgColor} p-5 cursor-pointer transition-all duration-300 hover:scale-105 ${
+        isExpanded ? 'ring-2 ring-primary/50' : ''
+      }`}
+      onClick={() => setIsExpanded(!isExpanded)}
+    >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-xl ${cause.bgColor} flex items-center justify-center border ${cause.borderColor}`}>
+                        <IconComponent className={`w-5 h-5 ${cause.color}`} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-foreground text-sm">{cause.title}</h4>
+                        <p className="text-xs text-muted-foreground mt-1">{cause.description}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-muted-foreground font-semibold">Impact</span>
+                      <span className={`text-sm font-bold ${cause.color}`}>{cause.impact}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-border/30 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          cause.color.includes('green') ? 'bg-green-500' :
+                          cause.color.includes('red') ? 'bg-red-500' :
+                          cause.color.includes('orange') ? 'bg-orange-500' :
+                          cause.color.includes('amber') ? 'bg-amber-500' :
+                          cause.color.includes('blue') ? 'bg-blue-500' :
+                          'bg-purple-500'
+                        }`}
+                        style={{ width: `${cause.impact}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="mt-4 pt-4 border-t border-border/30 animate-in slide-in-from-top-2">
+                      <p className="text-xs font-semibold text-foreground mb-2">Key Factors:</p>
+                      <ul className="space-y-2">
+                        {cause.details.map((detail: string, idx: number) => (
+                          <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
+                            <span className="text-primary mt-1">•</span>
+                            <span>{detail}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+      <div className="mt-3 text-center">
+        <span className="text-xs text-muted-foreground">
+          {isExpanded ? 'Click to collapse' : 'Click to expand'}
+        </span>
       </div>
     </div>
   )

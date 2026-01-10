@@ -17,7 +17,9 @@ import threading
 load_dotenv()
 
 # WAQI API Token
-WAQI_TOKEN = "62fbeb618094ae4ec793918f91392c3716055dab"
+WAQI_TOKEN = os.getenv("WAQI_API_TOKEN")
+if not WAQI_TOKEN:
+    logger.warning("WAQI_API_TOKEN not set in environment variables. AQI data collection will fail.")
 
 # Redis Configuration
 # Support both connection string (Redis Cloud) and individual parameters (local)
@@ -163,14 +165,27 @@ class AQICollector:
         """
         Fetch AQI data for a specific location using WAQI API
         Returns dict with AQI and pollutant data
+        Note: This is synchronous for backward compatibility with scheduler
+        For async endpoints, use the async version in main.py
         """
         try:
+            # Check if token is available
+            if not WAQI_TOKEN:
+                logger.error("WAQI_API_TOKEN not set. Cannot fetch AQI data.")
+                return None
+            
+            # Validate coordinates
+            if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+                logger.error(f"Invalid coordinates: lat={lat}, lon={lon}")
+                return None
+            
             detail_url = f"https://api.waqi.info/feed/geo:{lat};{lon}/?token={WAQI_TOKEN}"
             response = requests.get(detail_url, timeout=10)
+            response.raise_for_status()
             data = response.json()
             
             if data.get("status") != "ok":
-                print(f"WAQI API Error for ({lat}, {lon}): {data.get('data', 'Unknown error')}")
+                logger.warning(f"WAQI API Error for ({lat}, {lon}): {data.get('data', 'Unknown error')}")
                 return None
             
             station_full = data.get("data", {})
@@ -194,8 +209,11 @@ class AQICollector:
                 "timestamp": time_data.get("s", datetime.utcnow().isoformat()),
                 "fetched_at": datetime.utcnow().isoformat()
             }
+        except requests.RequestException as e:
+            logger.error(f"HTTP error fetching AQI data for ({lat}, {lon}): {e}")
+            return None
         except Exception as e:
-            print(f"Error fetching AQI for ({lat}, {lon}): {e}")
+            logger.error(f"Unexpected error fetching AQI data for ({lat}, {lon}): {e}", exc_info=True)
             return None
     
     def store_hourly_data_in_redis(self, ward: Dict, aqi_data: Dict):
@@ -225,7 +243,7 @@ class AQICollector:
         self.redis_client.zadd(day_key, {json.dumps(aqi_data): score})
         self.redis_client.expire(day_key, 86400 * 2)  # Expire after 2 days
         
-        print(f"✓ Stored hourly data for {ward['ward_name']} ({ward_no}) at {now.strftime('%Y-%m-%d %H:00')}")
+        logger.info(f"✓ Stored hourly data for {ward['ward_name']} ({ward_no}) at {now.strftime('%Y-%m-%d %H:00')}")
     
     def get_hourly_data_from_redis(self, ward_no: str, target_date: date) -> List[Dict]:
         """
@@ -313,25 +331,27 @@ class AQICollector:
         Fetch AQI data for all selected wards and store in Redis
         This should be called every hour
         """
-        print(f"\n{'='*70}")
-        print(f"Fetching AQI data at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"{'='*70}")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"Fetching AQI data at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"{'='*70}")
         
+        success_count = 0
         for ward in self.selected_wards:
-            print(f"\nFetching data for {ward['ward_name']} ({ward['ward_no']})...")
+            logger.info(f"\nFetching data for {ward['ward_name']} ({ward['ward_no']})...")
             aqi_data = self.fetch_aqi_for_ward(ward["latitude"], ward["longitude"])
             
             if aqi_data:
                 self.store_hourly_data_in_redis(ward, aqi_data)
+                success_count += 1
             else:
-                print(f"⚠ No data available for {ward['ward_name']}")
+                logger.warning(f"⚠ No data available for {ward['ward_name']}")
             
             # Small delay to avoid rate limiting
             time.sleep(0.5)
         
-        print(f"\n{'='*70}")
-        print("Hourly data collection completed")
-        print(f"{'='*70}\n")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"Hourly data collection completed - {success_count}/{len(self.selected_wards)} wards successful")
+        logger.info(f"{'='*70}\n")
     
     def calculate_and_store_daily_averages(self, target_date: Optional[date] = None):
         """

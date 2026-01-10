@@ -6,6 +6,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 // Create axios instance
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 30000, // 30 seconds timeout
   headers: {
     'Content-Type': 'application/json',
   },
@@ -25,16 +26,38 @@ api.interceptors.request.use(
   }
 )
 
-// Response interceptor to handle auth errors
+// Response interceptor to handle auth errors and retries
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config
+    
+    // Handle 401 - Unauthorized
     if (error.response?.status === 401) {
       // Clear token and redirect to login
       localStorage.removeItem('access_token')
       localStorage.removeItem('user')
       // You can add redirect logic here
+      return Promise.reject(error)
     }
+    
+    // Retry logic for network errors and 5xx errors
+    if (
+      (!error.response || error.response.status >= 500) &&
+      !originalRequest._retry &&
+      originalRequest._retryCount < 3
+    ) {
+      originalRequest._retry = true
+      originalRequest._retryCount = (originalRequest._retryCount || 0) + 1
+      
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = Math.pow(2, originalRequest._retryCount - 1) * 1000
+      
+      await new Promise(resolve => setTimeout(resolve, delay))
+      
+      return api(originalRequest)
+    }
+    
     return Promise.reject(error)
   }
 )
@@ -379,21 +402,31 @@ export const aqiService = {
     return data
   },
 
-  async getForecast(location: string, hours: number = 24) {
-    // Mock forecast data - replace with real API
-    const data = []
-    for (let i = 0; i < hours; i++) {
-      const date = new Date()
-      date.setHours(date.getHours() + i)
-      data.push({
-        time: date.toISOString(),
-        aqi: Math.floor(Math.random() * 100) + 150,
-        pm25: Math.floor(Math.random() * 50) + 80,
-        pm10: Math.floor(Math.random() * 80) + 120,
-        confidence: Math.floor(Math.random() * 20) + 80
+  async getForecast(ward_no: string, period: '24h' | '7d' | '30d' = '7d', metric: 'aqi' | 'pm25' | 'pm10' | 'no2' | 'o3' = 'aqi'): Promise<{
+    ward_no: string
+    ward_name: string
+    period: string
+    metric: string
+    forecast: Array<{
+      time: string
+      day: string
+      [key: string]: number | string
+    }>
+    confidence: number
+    historical_data_points: number
+    trend: string
+    generated_at: string
+    note?: string
+  }> {
+    try {
+      const response = await api.get(`/api/aqi/forecast/${ward_no}`, {
+        params: { period, metric }
       })
+      return response.data
+    } catch (error) {
+      console.error('Error fetching AI forecast:', error)
+      throw error
     }
-    return data
   }
 }
 

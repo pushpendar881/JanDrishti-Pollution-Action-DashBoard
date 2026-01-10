@@ -8,6 +8,8 @@ import os
 import traceback
 import requests
 import time
+import json
+import re
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -1136,6 +1138,289 @@ async def get_scheduler_status():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/aqi/forecast/{ward_no}")
+async def get_ai_forecast(
+    ward_no: str,
+    period: str = Query("7d", description="Forecast period: 24h, 7d, or 30d"),
+    metric: str = Query("aqi", description="Metric to forecast: aqi, pm25, pm10, no2, o3")
+):
+    """
+    Get AI-powered pollution forecast for a specific ward using Groq API
+    Analyzes historical data and generates predictions
+    """
+    try:
+        # Validate inputs
+        if period not in ["24h", "7d", "30d"]:
+            raise AppException("Period must be one of: 24h, 7d, 30d", status_code=400)
+        if metric not in ["aqi", "pm25", "pm10", "no2", "o3"]:
+            raise AppException("Metric must be one of: aqi, pm25, pm10, no2, o3", status_code=400)
+        
+        # Use singleton instance
+        collector = get_collector()
+        
+        # Find ward
+        ward = next((w for w in collector.selected_wards if w.get("ward_no") == ward_no), None)
+        if not ward:
+            raise AppException(f"Ward {ward_no} not found", status_code=404)
+        
+        # Get historical data based on period
+        today = date.today()
+        historical_data = []
+        
+        if period == "24h":
+            # Get last 7 days of hourly data for pattern analysis
+            for i in range(7):
+                target_date = today - timedelta(days=i)
+                day_data = collector.get_hourly_data_from_redis(ward_no, target_date)
+                historical_data.extend(day_data)
+        elif period == "7d":
+            # Get last 30 days of daily averages
+            try:
+                response = supabase.table("ward_aqi_daily")\
+                    .select("*")\
+                    .eq("ward_no", ward_no)\
+                    .order("date", desc=True)\
+                    .limit(30)\
+                    .execute()
+                historical_data = response.data or []
+            except Exception as e:
+                logger.warning(f"Could not fetch daily data from Supabase: {e}")
+                # Fallback to hourly data
+                for i in range(30):
+                    target_date = today - timedelta(days=i)
+                    day_data = collector.get_hourly_data_from_redis(ward_no, target_date)
+                    if day_data:
+                        # Calculate average for the day
+                        avg_aqi = sum(r.get("aqi", 0) for r in day_data if r.get("aqi")) / len(day_data) if day_data else None
+                        if avg_aqi:
+                            historical_data.append({
+                                "date": target_date.isoformat(),
+                                "aqi": avg_aqi,
+                                "pm25": sum(r.get("pm25", 0) for r in day_data if r.get("pm25")) / len([r for r in day_data if r.get("pm25")]) if any(r.get("pm25") for r in day_data) else None,
+                                "pm10": sum(r.get("pm10", 0) for r in day_data if r.get("pm10")) / len([r for r in day_data if r.get("pm10")]) if any(r.get("pm10") for r in day_data) else None,
+                                "no2": sum(r.get("no2", 0) for r in day_data if r.get("no2")) / len([r for r in day_data if r.get("no2")]) if any(r.get("no2") for r in day_data) else None,
+                                "o3": sum(r.get("o3", 0) for r in day_data if r.get("o3")) / len([r for r in day_data if r.get("o3")]) if any(r.get("o3") for r in day_data) else None,
+                            })
+        else:  # 30d
+            # Get last 90 days of daily averages
+            try:
+                response = supabase.table("ward_aqi_daily")\
+                    .select("*")\
+                    .eq("ward_no", ward_no)\
+                    .order("date", desc=True)\
+                    .limit(90)\
+                    .execute()
+                historical_data = response.data or []
+            except Exception as e:
+                logger.warning(f"Could not fetch daily data from Supabase: {e}")
+        
+        if not historical_data:
+            raise AppException(
+                "Insufficient historical data for forecast. Please wait for more data to be collected.",
+                status_code=404
+            )
+        
+        # Prepare data for Groq analysis
+        historical_summary = []
+        for data_point in historical_data[-20:]:  # Last 20 data points for context
+            value = data_point.get(metric)
+            if value is not None:
+                historical_summary.append({
+                    "date": data_point.get("date") or data_point.get("fetched_at", ""),
+                    "value": float(value)
+                })
+        
+        if not historical_summary:
+            raise AppException(f"No historical data available for {metric}", status_code=404)
+        
+        # Calculate basic statistics
+        values = [d["value"] for d in historical_summary]
+        avg_value = sum(values) / len(values)
+        min_value = min(values)
+        max_value = max(values)
+        recent_trend = "increasing" if len(values) > 1 and values[-1] > values[-2] else "decreasing" if len(values) > 1 and values[-1] < values[-2] else "stable"
+        
+        # Create prompt for Groq
+        forecast_prompt = f"""You are an AI environmental analyst. Analyze the following historical {metric.upper()} data for {ward.get('ward_name')} (Ward {ward_no}) and generate a {period} forecast.
+
+Historical Data (last {len(historical_summary)} readings):
+{chr(10).join([f"- {d['date']}: {d['value']:.1f}" for d in historical_summary[-10:]])}
+
+Statistics:
+- Average: {avg_value:.1f}
+- Minimum: {min_value:.1f}
+- Maximum: {max_value:.1f}
+- Recent Trend: {recent_trend}
+
+Generate a {period} forecast with the following requirements:
+1. Analyze patterns, trends, and seasonality in the data
+2. Predict future values for {metric.upper()}
+3. Consider typical pollution patterns (morning peaks, evening peaks, weekly patterns, etc.)
+4. Provide realistic predictions based on historical patterns
+5. Include confidence scores (0-100%) for each prediction
+
+Return ONLY a JSON array with this exact format:
+[
+  {{"time": "HH:MM" or "Day", "{metric}": <predicted_value>, "confidence": <0-100>}},
+  ...
+]
+
+For 24h: Provide hourly predictions (24 data points)
+For 7d: Provide daily predictions (7 data points, use day names: Mon, Tue, Wed, etc.)
+For 30d: Provide daily predictions (30 data points, use day names)
+
+IMPORTANT: Return ONLY valid JSON, no explanations, no markdown, just the array."""
+        
+        # Call Groq API
+        try:
+            chat_completion = groq_client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert environmental data analyst. You analyze air quality data and generate accurate forecasts. Always respond with valid JSON arrays only."
+                    },
+                    {
+                        "role": "user",
+                        "content": forecast_prompt
+                    }
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.3,  # Lower temperature for more consistent predictions
+                max_tokens=2000
+            )
+            
+            ai_response = chat_completion.choices[0].message.content
+            
+            # Parse JSON response
+            # Try to extract JSON from response (in case it's wrapped in markdown)
+            if "```json" in ai_response:
+                ai_response = ai_response.split("```json")[1].split("```")[0].strip()
+            elif "```" in ai_response:
+                ai_response = ai_response.split("```")[1].split("```")[0].strip()
+            
+            # Try parsing as array or object
+            try:
+                forecast_data = json.loads(ai_response)
+                # If it's an object with a key, extract the array
+                if isinstance(forecast_data, dict):
+                    for key in forecast_data:
+                        if isinstance(forecast_data[key], list):
+                            forecast_data = forecast_data[key]
+                            break
+            except json.JSONDecodeError:
+                # Try to extract array from text
+                array_match = re.search(r'\[.*\]', ai_response, re.DOTALL)
+                if array_match:
+                    forecast_data = json.loads(array_match.group())
+                else:
+                    raise ValueError("Could not parse forecast data from AI response")
+            
+            # Validate and format forecast data
+            if not isinstance(forecast_data, list):
+                raise ValueError("Forecast data is not a list")
+            
+            # Ensure all required fields
+            formatted_forecast = []
+            for item in forecast_data:
+                if isinstance(item, dict):
+                    formatted_forecast.append({
+                        "time": item.get("time", ""),
+                        "day": item.get("day", item.get("time", "")),
+                        metric: float(item.get(metric, item.get("value", avg_value))),
+                        "confidence": float(item.get("confidence", 85.0))
+                    })
+            
+            # If we don't have enough data points, generate them
+            expected_points = 24 if period == "24h" else (7 if period == "7d" else 30)
+            if len(formatted_forecast) < expected_points:
+                # Use the last value and trend to generate remaining points
+                last_value = formatted_forecast[-1][metric] if formatted_forecast else avg_value
+                trend_factor = 1.02 if recent_trend == "increasing" else 0.98 if recent_trend == "decreasing" else 1.0
+                
+                for i in range(len(formatted_forecast), expected_points):
+                    if period == "24h":
+                        hour = i
+                        time_str = f"{hour:02d}:00"
+                    else:
+                        days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                        day_idx = i % 7
+                        time_str = days[day_idx]
+                    
+                    # Apply slight variation
+                    variation = (i % 3 - 1) * (max_value - min_value) * 0.05
+                    predicted_value = last_value * (trend_factor ** (i - len(formatted_forecast))) + variation
+                    predicted_value = max(min_value * 0.8, min(max_value * 1.2, predicted_value))  # Keep within reasonable bounds
+                    
+                    formatted_forecast.append({
+                        "time": time_str,
+                        "day": time_str,
+                        metric: round(predicted_value, 1),
+                        "confidence": max(70.0, 95.0 - (i * 0.5))  # Decreasing confidence for further predictions
+                    })
+            
+            # Calculate overall confidence
+            avg_confidence = sum(f.get("confidence", 85) for f in formatted_forecast) / len(formatted_forecast)
+            
+            return {
+                "ward_no": ward_no,
+                "ward_name": ward.get("ward_name"),
+                "period": period,
+                "metric": metric,
+                "forecast": formatted_forecast[:expected_points],
+                "confidence": round(avg_confidence, 1),
+                "historical_data_points": len(historical_summary),
+                "trend": recent_trend,
+                "generated_at": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating AI forecast with Groq: {e}", exc_info=True)
+            # Fallback: Generate simple forecast based on statistics
+            expected_points = 24 if period == "24h" else (7 if period == "7d" else 30)
+            fallback_forecast = []
+            
+            for i in range(expected_points):
+                if period == "24h":
+                    time_str = f"{i:02d}:00"
+                else:
+                    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                    time_str = days[i % 7] if period == "7d" else f"Day {i+1}"
+                
+                # Simple trend-based prediction
+                trend_factor = 1.01 if recent_trend == "increasing" else 0.99 if recent_trend == "decreasing" else 1.0
+                base_value = values[-1] if values else avg_value
+                predicted_value = base_value * (trend_factor ** i)
+                predicted_value = max(min_value * 0.9, min(max_value * 1.1, predicted_value))
+                
+                fallback_forecast.append({
+                    "time": time_str,
+                    "day": time_str,
+                    metric: round(predicted_value, 1),
+                    "confidence": max(70.0, 90.0 - (i * 0.3))
+                })
+            
+            return {
+                "ward_no": ward_no,
+                "ward_name": ward.get("ward_name"),
+                "period": period,
+                "metric": metric,
+                "forecast": fallback_forecast,
+                "confidence": 75.0,
+                "historical_data_points": len(historical_summary),
+                "trend": recent_trend,
+                "generated_at": datetime.utcnow().isoformat(),
+                "note": "Fallback forecast (AI service unavailable)"
+            }
+        
+    except AppException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in AI forecast endpoint: {e}", exc_info=True)
+        raise AppException(
+            "Failed to generate forecast. Please try again later.",
+            status_code=500
+        )
 
 @app.post("/api/aqi/scheduler/trigger/hourly")
 async def trigger_hourly_collection():
