@@ -1,8 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { motion } from "framer-motion"
-import { Building2, Bell, Menu, User } from "lucide-react"
+import { Building2, User } from "lucide-react"
 import { ModeToggle } from "./mode-toggle"
 import { useAuth } from "@/context/auth-context"
 import AuthDialog from "@/components/auth-dialog"
@@ -71,68 +70,55 @@ export default function Header({ selectedWard, setSelectedWard }: HeaderProps) {
 
   return (
     <header
-      className={`sticky top-0 z-50 transition-all duration-500 ${isScrolled
-        ? "py-3 glass-morphism-strong border-b"
-        : "py-6 bg-transparent"
+      className={`sticky top-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border ${isScrolled
+        ? "py-3"
+        : "py-4"
         }`}
     >
       <div className="container-px flex items-center justify-between">
         <div className="flex items-center gap-12">
           {/* Logo */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-3 group cursor-pointer"
-          >
-            <div className="relative">
-              <div className="w-10 h-10 rounded-xl grad-primary flex items-center justify-center text-primary-foreground font-bold text-xl shadow-[0_0_20px_rgba(56,189,248,0.3)] group-hover:scale-110 transition-transform duration-300">
-                J
-              </div>
-              <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background animate-pulse" />
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center text-white font-semibold text-lg">
+              J
             </div>
             <div>
-              <div className="text-xl font-bold tracking-tight text-foreground flex items-center gap-1">
+              <div className="text-lg font-semibold text-foreground">
                 JanDrishti
-                <span className="text-primary text-[10px] font-black uppercase tracking-[0.2em] px-1.5 py-0.5 rounded-md bg-primary/10 border border-primary/20">Pro</span>
               </div>
-              <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-[0.1em]">Environmental Intelligence</div>
+              <div className="text-xs text-muted-foreground">Environmental Intelligence</div>
             </div>
-          </motion.div>
+          </div>
 
         </div>
 
         <div className="flex items-center gap-4">
           {/* Ward Selector */}
-          <div className="hidden md:flex items-center gap-2 p-1 rounded-2xl bg-muted/30 border backdrop-blur-md">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/50 transition-colors group cursor-pointer">
-              <Building2 size={14} className="text-accent group-hover:animate-bounce" />
-              <select
-                value={selectedWard}
-                onChange={(e) => setSelectedWard(e.target.value)}
-                className="bg-transparent text-sm font-bold text-foreground outline-none cursor-pointer"
-              >
-                {wardOptions.map((ward) => (
-                  <option key={ward.id} value={ward.id} className="bg-background">
-                    {ward.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-background">
+            <Building2 size={16} className="text-muted-foreground" />
+            <select
+              value={selectedWard}
+              onChange={(e) => setSelectedWard(e.target.value)}
+              className="bg-transparent text-sm font-medium text-foreground outline-none cursor-pointer border-none"
+            >
+              {wardOptions.map((ward) => (
+                <option key={ward.id} value={ward.id}>
+                  {ward.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
             <ModeToggle />
-            <button className="p-2.5 rounded-xl bg-muted/30 border hover:bg-muted/50 transition-all text-muted-foreground hover:text-primary">
-              <Bell size={18} />
-            </button>
 
             {/* User Authentication */}
             {isAuthenticated && user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-muted/30 border hover:bg-muted/50 transition-all hover:scale-105 group">
-                    <div className="w-8 h-8 rounded-full grad-primary flex items-center justify-center text-primary-foreground text-sm font-bold shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform">
+                  <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors">
+                    <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-sm font-medium">
                       {user.email?.charAt(0).toUpperCase() || "U"}
                     </div>
                     {/* <span className="text-sm font-bold text-foreground hidden sm:inline">
@@ -168,25 +154,14 @@ export default function Header({ selectedWard, setSelectedWard }: HeaderProps) {
                 {/* Desktop Login Button */}
                 <button
                   onClick={() => setShowAuthDialog(true)}
-                  className="hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-xl grad-primary text-primary-foreground font-bold text-sm hover:scale-105 transition-all shadow-lg shadow-primary/20"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white font-medium text-sm hover:bg-primary/90 transition-colors"
                 >
                   <User size={16} />
-                  Login
-                </button>
-
-                {/* Mobile Login Button */}
-                <button
-                  onClick={() => setShowAuthDialog(true)}
-                  className="sm:hidden p-2.5 rounded-xl grad-primary text-primary-foreground hover:scale-105 transition-all shadow-lg shadow-primary/20"
-                >
-                  <User size={18} />
+                  <span className="hidden sm:inline">Login</span>
                 </button>
               </>
             )}
 
-            <button className="lg:hidden p-2.5 rounded-xl bg-muted/30 border text-foreground">
-              <Menu size={18} />
-            </button>
           </div>
         </div>
       </div>

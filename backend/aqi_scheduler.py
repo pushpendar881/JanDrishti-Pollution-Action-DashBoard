@@ -5,6 +5,7 @@ Runs background tasks to fetch hourly AQI data and calculate daily averages
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from aqi_collector import AQICollector
+from aqi_collector_singleton import get_collector
 import atexit
 import logging
 
@@ -27,7 +28,8 @@ class AQIScheduler:
             return
         
         try:
-            self.collector = AQICollector()
+            # Use singleton instance to avoid creating multiple connections
+            self.collector = get_collector()
             
             # Job 1: Fetch hourly AQI data every hour at minute 0 (IST)
             self.scheduler.add_job(
@@ -92,13 +94,13 @@ class AQIScheduler:
     def trigger_hourly_fetch(self):
         """Manually trigger hourly data fetch"""
         if not self.collector:
-            self.collector = AQICollector()
+            self.collector = get_collector()
         self._fetch_hourly_data()
     
     def trigger_daily_calculation(self):
         """Manually trigger daily average calculation"""
         if not self.collector:
-            self.collector = AQICollector()
+            self.collector = get_collector()
         self._calculate_daily_averages()
 
 

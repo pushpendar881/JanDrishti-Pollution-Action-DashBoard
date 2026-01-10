@@ -8,7 +8,7 @@ interface AuthContextType {
   loading: boolean
   isAuthenticated: boolean
   login: (email: string, password: string) => Promise<void>
-  signup: (email: string, password: string, fullName?: string) => Promise<any>
+  signup: (email: string, password: string, fullName?: string, phoneNumber?: string) => Promise<any>
   logout: () => void
   checkAuth: () => Promise<void>
 }
@@ -72,9 +72,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const signup = async (email: string, password: string, fullName?: string) => {
+  const signup = async (email: string, password: string, fullName?: string, phoneNumber?: string) => {
     try {
-      const response = await authService.signup({ email, password, full_name: fullName })
+      const response = await authService.signup({ 
+        email, 
+        password, 
+        full_name: fullName,
+        phone_number: phoneNumber
+      })
       // Only set token and user if we have a session (email confirmed)
       if (response.access_token) {
         setAuthToken(response.access_token)

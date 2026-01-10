@@ -44,6 +44,7 @@ export interface User {
   id: string
   email: string
   full_name?: string
+  phone_number?: string
 }
 
 export interface LoginCredentials {
@@ -55,6 +56,7 @@ export interface SignupCredentials {
   email: string
   password: string
   full_name?: string
+  phone_number?: string
 }
 
 export interface Report {

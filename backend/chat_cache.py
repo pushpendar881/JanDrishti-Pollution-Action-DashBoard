@@ -12,21 +12,76 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Redis Configuration
+# Support both connection string (Redis Cloud) and individual parameters (local)
+REDIS_URL = os.getenv("REDIS_URL", None)  # Redis Cloud connection string
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
+REDIS_USERNAME = os.getenv("REDIS_USERNAME", "default")  # Redis Cloud default username
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
+REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"  # Enable SSL for Redis Cloud
 
 class ChatCache:
     def __init__(self):
         """Initialize Redis client for chat caching"""
-        self.redis_client = redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            db=REDIS_DB,
-            password=REDIS_PASSWORD,
-            decode_responses=True
-        )
+        # Redis client - support both connection string and individual parameters
+        try:
+            if REDIS_URL:
+                # Use connection string (Redis Cloud format: redis://default:password@host:port)
+                # or rediss:// for SSL
+                # Check if URL already has SSL protocol
+                use_ssl = REDIS_URL.startswith('rediss://') or REDIS_SSL
+                self.redis_client = redis.from_url(
+                    REDIS_URL,
+                    decode_responses=True,
+                    ssl=use_ssl,
+                    ssl_cert_reqs=None if use_ssl else False,
+                    socket_connect_timeout=5
+                )
+            else:
+                # Use individual parameters (local Redis or Redis Cloud)
+                # Try with SSL first if enabled, fallback to non-SSL if SSL fails
+                try:
+                    self.redis_client = redis.Redis(
+                        host=REDIS_HOST,
+                        port=REDIS_PORT,
+                        db=REDIS_DB,
+                        username=REDIS_USERNAME if REDIS_PASSWORD else None,  # Only set username if password is provided
+                        password=REDIS_PASSWORD,
+                        decode_responses=True,
+                        ssl=REDIS_SSL,
+                        ssl_cert_reqs=None if REDIS_SSL else False,
+                        socket_connect_timeout=5
+                    )
+                    # Test connection
+                    self.redis_client.ping()
+                except (redis.ConnectionError, redis.TimeoutError) as ssl_error:
+                    if REDIS_SSL and ("SSL" in str(ssl_error) or "wrong version" in str(ssl_error).lower()):
+                        # SSL failed, try without SSL (some Redis Cloud ports don't use SSL)
+                        print(f"⚠️  SSL connection failed, trying without SSL...")
+                        self.redis_client = redis.Redis(
+                            host=REDIS_HOST,
+                            port=REDIS_PORT,
+                            db=REDIS_DB,
+                            username=REDIS_USERNAME if REDIS_PASSWORD else None,
+                            password=REDIS_PASSWORD,
+                            decode_responses=True,
+                            ssl=False,
+                            socket_connect_timeout=5
+                        )
+                        self.redis_client.ping()
+                    else:
+                        raise
+            
+            # Test connection if not already tested
+            if not REDIS_URL:
+                self.redis_client.ping()
+        except redis.ConnectionError as e:
+            raise ConnectionError(f"Failed to connect to Redis: {e}. Please check your Redis configuration.")
+        except redis.AuthenticationError as e:
+            raise ConnectionError(f"Redis authentication failed: {e}. Please check your password.")
+        except Exception as e:
+            raise ValueError(f"Redis initialization error: {e}")
         
         # Configuration
         self.CACHE_TTL = 3600 * 24  # 24 hours

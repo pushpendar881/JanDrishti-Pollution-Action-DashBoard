@@ -25,6 +25,7 @@ export default function AuthDialog({ open, onOpenChange, mode: initialMode = "lo
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [fullName, setFullName] = useState("")
+  const [phoneNumber, setPhoneNumber] = useState("")
   const [error, setError] = useState("")
   const [successMessage, setSuccessMessage] = useState("")
   const [loading, setLoading] = useState(false)
@@ -47,8 +48,9 @@ export default function AuthDialog({ open, onOpenChange, mode: initialMode = "lo
         setEmail("")
         setPassword("")
         setFullName("")
+        setPhoneNumber("")
       } else {
-        const response = await signup(email, password, fullName || undefined)
+        const response = await signup(email, password, fullName || undefined, phoneNumber || undefined)
         // Check if there's a message about email confirmation
         if (response && response.message) {
           setSuccessMessage(response.message)
@@ -74,6 +76,7 @@ export default function AuthDialog({ open, onOpenChange, mode: initialMode = "lo
           setEmail("")
           setPassword("")
           setFullName("")
+          setPhoneNumber("")
         }
       }
     } catch (err: any) {
@@ -131,16 +134,32 @@ export default function AuthDialog({ open, onOpenChange, mode: initialMode = "lo
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === "signup" && (
-            <div className="space-y-2">
-              <Label htmlFor="fullName">Full Name</Label>
-              <Input
-                id="fullName"
-                type="text"
-                placeholder="John Doe"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-              />
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="fullName">Full Name</Label>
+                <Input
+                  id="fullName"
+                  type="text"
+                  placeholder="John Doe"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="phoneNumber">Phone Number</Label>
+                <Input
+                  id="phoneNumber"
+                  type="tel"
+                  placeholder="+91 9876543210"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  pattern="[+]?[0-9\s\-()]+"
+                />
+                <p className="text-xs text-muted-foreground">
+                  We'll send WhatsApp updates about air quality alerts
+                </p>
+              </div>
+            </>
           )}
 
           <div className="space-y-2">

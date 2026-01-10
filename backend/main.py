@@ -16,6 +16,7 @@ from groq import Groq
 from aqi_scheduler import get_scheduler
 from chat_cache import get_chat_cache
 from aqi_collector import AQICollector
+from aqi_collector_singleton import get_collector
 
 
 load_dotenv()
@@ -79,6 +80,7 @@ class UserSignup(BaseModel):
     email: EmailStr
     password: str
     full_name: Optional[str] = None
+    phone_number: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -183,7 +185,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 async def fetch_aqi_data_for_ward(ward_name: str = None, ward_no: str = None) -> dict:
     """Fetch current AQI data for a specific ward from Redis or API"""
     try:
-        collector = AQICollector()
+        # Use singleton instance to avoid creating new connections
+        collector = get_collector()
         
         # If ward_name provided, find ward_no
         if ward_name and not ward_no:
@@ -260,7 +263,8 @@ async def detect_ward_from_message(message: str) -> tuple:
     if ward_no_match:
         ward_no = ward_no_match.group(1)
         try:
-            collector = AQICollector()
+            # Use singleton instance
+            collector = get_collector()
             ward_name = next((w.get("ward_name") for w in collector.selected_wards if w.get("ward_no") == ward_no), None)
             return ward_name or f"Ward {ward_no}", ward_no
         except:
@@ -307,7 +311,8 @@ Use this REAL data to answer the user's question. Do NOT say you don't have acce
             else:
                 # Fetch data for all wards if no specific ward mentioned
                 try:
-                    collector = AQICollector()
+                    # Use singleton instance
+                    collector = get_collector()
                     all_wards_data = []
                     for ward in collector.selected_wards[:4]:  # Limit to 4 wards
                         ward_data = await fetch_aqi_data_for_ward(None, ward.get("ward_no"))
@@ -383,13 +388,19 @@ async def signup(user_data: UserSignup):
     """Register a new user"""
     try:
         # Create user in Supabase Auth
+        user_metadata = {
+            "full_name": user_data.full_name or ""
+        }
+        
+        # Add phone number to metadata if provided
+        if user_data.phone_number:
+            user_metadata["phone_number"] = user_data.phone_number
+        
         response = supabase.auth.sign_up({
             "email": user_data.email,
             "password": user_data.password,
             "options": {
-                "data": {
-                    "full_name": user_data.full_name or ""
-                }
+                "data": user_metadata
             }
         })
         
@@ -437,7 +448,7 @@ async def login(credentials: UserLogin):
                 detail="Email not confirmed. Please check your email and confirm your account."
             )
         
-        # Get user profile
+        # Get user profile and metadata
         try:
             profile = supabase.table("profiles").select("*").eq("id", response.user.id).single().execute()
             full_name = profile.data.get("full_name") if profile.data else None
@@ -446,12 +457,17 @@ async def login(credentials: UserLogin):
             print(f"DEBUG: Profile fetch error (non-critical): {profile_error}")
             full_name = None
         
+        # Get phone number from user metadata
+        user_metadata = response.user.user_metadata if hasattr(response.user, 'user_metadata') else {}
+        phone_number = user_metadata.get("phone_number")
+        
         return TokenResponse(
             access_token=response.session.access_token,
             user={
                 "id": response.user.id,
                 "email": response.user.email,
-                "full_name": full_name
+                "full_name": full_name,
+                "phone_number": phone_number
             }
         )
     except HTTPException:
@@ -493,10 +509,16 @@ async def get_current_user_info(current_user = Depends(get_current_user)):
     """Get current authenticated user information"""
     try:
         profile = supabase.table("profiles").select("*").eq("id", current_user.id).single().execute()
+        
+        # Get phone number from user metadata
+        user_metadata = current_user.user_metadata if hasattr(current_user, 'user_metadata') else {}
+        phone_number = user_metadata.get("phone_number")
+        
         return {
             "id": current_user.id,
             "email": current_user.email,
-            "full_name": profile.data.get("full_name") if profile.data else None
+            "full_name": profile.data.get("full_name") if profile.data else None,
+            "phone_number": phone_number
         }
     except Exception as e:
         raise HTTPException(status_code=404, detail="User profile not found")
@@ -1022,7 +1044,8 @@ async def get_ward_hourly_aqi(
     Returns hourly readings for the last N hours
     """
     try:
-        collector = AQICollector()
+        # Use singleton instance to avoid creating new connections
+        collector = get_collector()
         
         # Limit to max 48 hours
         hours = min(hours, 48)
