@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, Query
+from fastapi import FastAPI, HTTPException, Depends, status, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
@@ -10,6 +10,7 @@ import requests
 import time
 import json
 import re
+import logging
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -19,9 +20,22 @@ from aqi_scheduler import get_scheduler
 from chat_cache import get_chat_cache
 from aqi_collector import AQICollector
 from aqi_collector_singleton import get_collector
+from middleware.error_handler import AppException
+import geopandas as gpd
+import pandas as pd
+from shapely.geometry import Point
+import json
+import requests
 
 
 load_dotenv()
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Lifespan context for scheduler
 @asynccontextmanager
@@ -383,6 +397,255 @@ Use this REAL data to answer the user's question. Do NOT say you don't have acce
         print(f"Error generating AI response: {e}")
         # Fallback response
         return f"I understand you're asking about: {user_message}. I'm having trouble connecting to my AI service right now, but I'm here to help with pollution monitoring, air quality questions, and health recommendations. Please try again in a moment, or contact our support team for immediate assistance."
+
+def get_aqi_category(aqi: int) -> str:
+    """Get AQI category and color"""
+    if aqi <= 50:
+        return {"category": "Good", "color": "#00e400"}
+    elif aqi <= 100:
+        return {"category": "Satisfactory", "color": "#ffff00"}
+    elif aqi <= 200:
+        return {"category": "Moderate", "color": "#ff7e00"}
+    elif aqi <= 300:
+        return {"category": "Poor", "color": "#ff0000"}
+    elif aqi <= 400:
+        return {"category": "Very Poor", "color": "#8f3f97"}
+    else:
+        return {"category": "Severe", "color": "#7e0023"}
+    
+# ------------------------------------------------------
+# HEAVY PROCESSING (RUNS IN BACKGROUND ONLY)
+# ------------------------------------------------------
+def heavy_aqi_processing():
+    """
+    Fetch WAQI stations, compute ward averages, and produce final GeoJSON.
+    This function is CPU heavy & slow. It runs only ONCE per cron trigger.
+    """
+    print("\n==== Starting AQI recompute ====")
+
+    # -----------------------------------------------
+    # Load ward polygons
+    # -----------------------------------------------
+    wards_path = os.path.join(os.path.dirname(__file__), "Delhi_Wards.geojson")
+    if not os.path.exists(wards_path):
+        wards_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Delhi_Wards.geojson"))
+
+    if not os.path.exists(wards_path):
+        raise Exception("Delhi_Wards.geojson not found")
+
+    wards = gpd.read_file(wards_path)
+
+    # detect ward column
+    ward_cols = ["Ward_Name", "Ward_No", "Ward", "name", "NAME"]
+    WARD_COL = next((c for c in ward_cols if c in wards.columns), None)
+
+    if WARD_COL is None:
+        raise Exception(f"Could not detect ward-name column. Columns = {wards.columns}")
+
+    # -----------------------------------------------
+    # Fetch WAQI stations (basic)
+    # -----------------------------------------------
+    url = f"https://api.waqi.info/map/bounds/?latlng=28.4,76.8,28.9,77.4&token={WAQI_TOKEN}"
+    resp = requests.get(url)
+    data = resp.json()
+
+    if data.get("status") != "ok":
+        raise Exception("WAQI returned error")
+
+    stations_raw = data["data"]
+    station_rows = []
+    station_details = []
+
+    # -----------------------------------------------
+    # Process each station
+    # -----------------------------------------------
+    print(f"Found {len(stations_raw)} WAQI stations. Processing...")
+
+    for i, st in enumerate(stations_raw):
+        aqi_val = st.get("aqi")
+        if aqi_val in ["-", None]:
+            continue
+        try:
+            aqi_int = int(aqi_val)
+        except:
+            continue
+
+        lon = float(st["lon"])
+        lat = float(st["lat"])
+        name = st["station"]["name"]
+
+        # enrich category
+        info = get_aqi_category(aqi_int)
+
+        station_info = {
+            "name": name,
+            "lat": lat,
+            "lon": lon,
+            "aqi": aqi_int,
+            "category": info["category"],
+            "color": info["color"]
+        }
+
+        # fetch detailed pollutants
+        detailed = fetch_detailed_station_data(lat, lon)
+        station_info.update(detailed)
+
+        station_details.append(station_info)
+        station_rows.append([name, lon, lat, aqi_int])
+
+        time.sleep(0.15)
+
+    # -----------------------------------------------
+    # No stations?
+    # -----------------------------------------------
+    if not station_rows:
+        return {
+            "wards": json.loads(wards.to_json()),
+            "stations": [],
+            "summary": {}
+        }
+
+    # -----------------------------------------------
+    # Create GeoDataFrame
+    # -----------------------------------------------
+    df = pd.DataFrame(station_rows, columns=["name", "lon", "lat", "aqi"])
+    gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.lon, df.lat), crs="EPSG:4326")
+
+    # Spatial Join
+    joined = gpd.sjoin(gdf, wards, how="left", predicate="within")
+
+    # -----------------------------------------------
+    # Calculate Ward AQI Stats
+    # -----------------------------------------------
+    ward_stats = joined.groupby(WARD_COL).agg({
+        "aqi": ["mean", "max", "min", "count"]
+    }).reset_index()
+
+    ward_stats.columns = [WARD_COL, "avg_aqi", "max_aqi", "min_aqi", "station_count"]
+    ward_stats["avg_aqi"] = ward_stats["avg_aqi"].round(1)
+
+    # -----------------------------------------------
+    # Merge back
+    # -----------------------------------------------
+    wards = wards.merge(ward_stats, on=WARD_COL, how="left")
+
+    wards["avg_aqi"] = wards["avg_aqi"].fillna(0)
+    wards["max_aqi"] = wards["max_aqi"].fillna(0)
+    wards["min_aqi"] = wards["min_aqi"].fillna(0)
+    wards["station_count"] = wards["station_count"].fillna(0).astype(int)
+
+    wards["category"] = wards["avg_aqi"].apply(lambda x: get_aqi_category(int(x))["category"])
+    wards["color"] = wards["avg_aqi"].apply(lambda x: get_aqi_category(int(x))["color"])
+
+    final_geojson = json.loads(wards.to_json())
+
+    summary = {
+        "total_wards": len(wards),
+        "total_stations": len(station_details),
+        "avg_aqi": round(df["aqi"].mean(), 1),
+        "max_aqi": int(df["aqi"].max()),
+        "min_aqi": int(df["aqi"].min())
+    }
+
+    return {
+        "wards": final_geojson,
+        "stations": station_details,
+        "summary": summary
+    }
+
+#save cache to supabase
+def save_cache_to_db(data: dict):
+    """
+    Save AQI cache data to Supabase.
+    Since 'id' is an identity column (GENERATED ALWAYS), we can't specify it.
+    We'll use direct REST API calls to bypass Python client issues with identity columns.
+    """
+    try:
+        # Use direct REST API to avoid Python client issues with GENERATED ALWAYS columns
+        print("Checking for existing cache records...")
+        
+        # Get existing records using REST API
+        # Use service key if available, otherwise use regular key
+        api_key = supabase_service_key if supabase_service_key else supabase_key
+        headers = {
+            "apikey": api_key,
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
+        
+        # Step 1: Delete all existing cache records
+        try:
+            delete_url = f"{supabase_url}/rest/v1/aqi_cache"
+            delete_resp = requests.get(delete_url, headers=headers, params={"select": "id"})
+            if delete_resp.ok and delete_resp.json():
+                existing_records = delete_resp.json()
+                print(f"Found {len(existing_records)} existing record(s). Deleting...")
+                for record in existing_records:
+                    record_id = record.get("id")
+                    if record_id:
+                        delete_one_url = f"{supabase_url}/rest/v1/aqi_cache?id=eq.{record_id}"
+                        del_resp = requests.delete(delete_one_url, headers=headers)
+                        if del_resp.ok:
+                            print(f"  ✓ Deleted old cache record with id={record_id}")
+                        else:
+                            print(f"  ⚠ Warning: Could not delete cache record {record_id}")
+            else:
+                print("No existing cache records found.")
+        except Exception as delete_err:
+            print(f"  ⚠ Warning: Could not check/delete existing records: {delete_err}")
+        
+        # Step 2: Insert new cache record using REST API (without specifying id)
+        print("Inserting new cache record (id will be auto-generated)...")
+        
+        insert_data = {
+            "data": data,
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+        insert_url = f"{supabase_url}/rest/v1/aqi_cache"
+        insert_resp = requests.post(
+            insert_url,
+            headers=headers,
+            json=insert_data
+        )
+        
+        if insert_resp.ok:
+            result = insert_resp.json()
+            if result and len(result) > 0:
+                record_id = result[0].get('id')
+                print(f"✅ Cache saved successfully! New record id={record_id}")
+                return result
+            else:
+                raise Exception("Insert succeeded but no data returned")
+        else:
+            error_text = insert_resp.text
+            print(f"❌ Insert failed with status {insert_resp.status_code}: {error_text}")
+            raise Exception(f"Failed to insert cache: {insert_resp.status_code} - {error_text}")
+            
+    except Exception as e:
+        error_msg = str(e)
+        print(f"❌ Error saving cache: {error_msg}")
+        
+        # Try fallback: Use Python client update if a record exists
+        print("Attempting fallback: Update existing record using Python client...")
+        try:
+            existing = supabase_admin.table("aqi_cache").select("id").order("id", desc=True).limit(1).execute()
+            if existing.data and len(existing.data) > 0:
+                record_id = existing.data[0]["id"]
+                print(f"Found existing record id={record_id}. Updating...")
+                response = supabase_admin.table("aqi_cache").update({
+                    "data": data,
+                    "generated_at": datetime.utcnow().isoformat()
+                }).eq("id", record_id).execute()
+                print(f"✅ Cache updated successfully in existing record id={record_id}")
+                return response.data
+            else:
+                print("No existing record found for update fallback.")
+                raise e
+        except Exception as update_err:
+            print(f"❌ Update fallback also failed: {update_err}")
+            raise e
 
 # Authentication Endpoints
 @app.post("/api/auth/signup", response_model=TokenResponse)
@@ -755,7 +1018,278 @@ async def clear_chat_cache(current_user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # AQI Endpoints
-WAQI_TOKEN = "62fbeb618094ae4ec793918f91392c3716055dab"
+WAQI_TOKEN = os.getenv("WAQI_API_TOKEN") or os.getenv("WAQI_TOKEN")
+if not WAQI_TOKEN:
+    logger.warning("WAQI_API_TOKEN not set. AQI endpoints will fail.")
+
+@app.post("/api/admin/recompute-aqi")
+def recompute_aqi(request: Request):
+    """
+    Trigger AQI data recomputation.
+    Can be secured with X-Backend-Secret header if BACKEND_SECRET env var is set.
+    """
+    try:
+        # Optional: Check for secret header if BACKEND_SECRET is configured
+        backend_secret = os.getenv("BACKEND_SECRET")
+        if backend_secret:
+            provided_secret = request.headers.get("X-Backend-Secret")
+            if provided_secret != backend_secret:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Unauthorized: Invalid secret key"
+                )
+        
+        print("Starting AQI recomputation...")
+
+        data = heavy_aqi_processing()
+
+        save_cache_to_db(data)
+
+        print("AQI recompute completed successfully.")
+
+        return {"status": "ok", "message": "AQI cache updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/recompute-aqi")
+def recompute_aqi_get():
+    """
+    GET endpoint to trigger AQI recomputation (for easier testing).
+    This is less secure but useful for development.
+    """
+    try:
+        print("Starting AQI recomputation (GET request)...")
+
+        data = heavy_aqi_processing()
+
+        save_cache_to_db(data)
+
+        print("AQI recompute completed successfully.")
+
+        return {
+            "status": "ok", 
+            "message": "AQI cache updated successfully",
+            "summary": data.get("summary", {}),
+            "wards_count": len(data.get("wards", {}).get("features", [])) if data.get("wards") else 0,
+            "stations_count": len(data.get("stations", []))
+        }
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/delhi-aqi")
+def get_cached_aqi():
+    """
+    Get cached AQI data from Supabase schema.
+    Enriches ward data with daily averages from ward_aqi_daily table.
+    If cache is empty, returns ward boundaries with daily averages if available.
+    """
+    try:
+        # Get the most recent cache entry
+        resp = supabase.table("aqi_cache").select("data").order("id", desc=True).limit(1).execute()
+        
+        if resp.data and len(resp.data) > 0 and resp.data[0].get("data"):
+            cached_data = resp.data[0]["data"]
+            
+            # Enrich ward data with daily averages from ward_aqi_daily
+            try:
+                # Get today's daily averages for all wards
+                today = date.today().isoformat()
+                daily_resp = supabase.table("ward_aqi_daily")\
+                    .select("*")\
+                    .eq("date", today)\
+                    .execute()
+                
+                if daily_resp.data:
+                    # Create a map of ward_no to daily average
+                    daily_map = {rec["ward_no"]: rec for rec in daily_resp.data}
+                    
+                    # If cached_data has wards, enrich them
+                    if "wards" in cached_data and "features" in cached_data["wards"]:
+                        for feature in cached_data["wards"]["features"]:
+                            ward_no = feature.get("properties", {}).get("Ward_No") or \
+                                      feature.get("properties", {}).get("ward_no")
+                            if ward_no and ward_no in daily_map:
+                                daily_avg = daily_map[ward_no]
+                                props = feature["properties"]
+                                # Update with daily average data if not already set
+                                if not props.get("avg_aqi") or props.get("avg_aqi") == 0:
+                                    props["avg_aqi"] = daily_avg["avg_aqi"]
+                                    props["min_aqi"] = daily_avg.get("min_aqi", daily_avg["avg_aqi"])
+                                    props["max_aqi"] = daily_avg.get("max_aqi", daily_avg["avg_aqi"])
+                                    props["avg_pm25"] = daily_avg.get("avg_pm25")
+                                    props["avg_pm10"] = daily_avg.get("avg_pm10")
+                                    props["avg_no2"] = daily_avg.get("avg_no2")
+                                    props["avg_o3"] = daily_avg.get("avg_o3")
+            except Exception as e:
+                logging.warning(f"Could not enrich with daily averages: {e}")
+            
+            return cached_data
+    except Exception as e:
+        logging.warning(f"Cache lookup failed: {e}")
+    
+    # Fallback: Return basic ward boundaries, enriched with daily averages if available
+    logging.info("Cache empty, returning basic ward boundaries with daily averages...")
+    try:
+        wards_path = os.path.join(os.path.dirname(__file__), "Delhi_Wards.geojson")
+        if not os.path.exists(wards_path):
+            wards_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Delhi_Wards.geojson"))
+        
+        if not os.path.exists(wards_path):
+            raise Exception("Delhi_Wards.geojson not found")
+        
+        wards = gpd.read_file(wards_path)
+        
+        # Add default values for wards without data
+        ward_cols = ["Ward_Name", "Ward_No", "Ward", "name", "NAME"]
+        WARD_COL = next((c for c in ward_cols if c in wards.columns), None)
+        
+        if WARD_COL is None:
+            raise Exception(f"Could not detect ward-name column. Columns = {wards.columns}")
+        
+        # Try to get daily averages from ward_aqi_daily table
+        daily_map = {}
+        try:
+            today = date.today().isoformat()
+            daily_resp = supabase.table("ward_aqi_daily")\
+                .select("*")\
+                .eq("date", today)\
+                .execute()
+            
+            if daily_resp.data:
+                daily_map = {rec["ward_no"]: rec for rec in daily_resp.data}
+                logging.info(f"Found {len(daily_map)} wards with daily averages for today")
+        except Exception as e:
+            logging.warning(f"Could not fetch daily averages: {e}")
+        
+        # Initialize ward properties
+        ward_no_col = next((c for c in ["Ward_No", "ward_no", "WARD_NO"] if c in wards.columns), None)
+        
+        for idx, row in wards.iterrows():
+            ward_no = str(row.get(ward_no_col, "")) if ward_no_col else ""
+            
+            if ward_no in daily_map:
+                # Use daily average data
+                daily_avg = daily_map[ward_no]
+                wards.at[idx, "avg_aqi"] = daily_avg["avg_aqi"]
+                wards.at[idx, "min_aqi"] = daily_avg.get("min_aqi", daily_avg["avg_aqi"])
+                wards.at[idx, "max_aqi"] = daily_avg.get("max_aqi", daily_avg["avg_aqi"])
+                wards.at[idx, "station_count"] = 0  # Will be populated by cache
+                wards.at[idx, "category"] = get_aqi_category(int(daily_avg["avg_aqi"]))
+                wards.at[idx, "color"] = get_aqi_category(int(daily_avg["avg_aqi"]))["color"]
+            else:
+                # Default values
+                wards.at[idx, "avg_aqi"] = 0
+                wards.at[idx, "max_aqi"] = 0
+                wards.at[idx, "min_aqi"] = 0
+                wards.at[idx, "station_count"] = 0
+                wards.at[idx, "category"] = "No Data"
+                wards.at[idx, "color"] = "#cccccc"
+        
+        final_geojson = json.loads(wards.to_json())
+        
+        # Calculate summary from daily averages if available
+        summary = {
+            "total_wards": len(wards),
+            "total_stations": 0,
+            "avg_aqi": 0,
+            "max_aqi": 0,
+            "min_aqi": 0,
+        }
+        
+        if daily_map:
+            aqi_values = [rec["avg_aqi"] for rec in daily_map.values() if rec.get("avg_aqi")]
+            if aqi_values:
+                summary["avg_aqi"] = sum(aqi_values) / len(aqi_values)
+                summary["max_aqi"] = max(aqi_values)
+                summary["min_aqi"] = min(aqi_values)
+            summary["message"] = "Using daily averages from database. Cache not initialized."
+        else:
+            summary["message"] = "Cache not initialized. Call /api/admin/recompute-aqi to generate full data."
+        
+        return {
+            "wards": final_geojson,
+            "stations": [],
+            "summary": summary
+        }
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to load ward boundaries: {str(e)}")
+
+# @app.get("/api/delhi-aqi/wards-only")
+# def delhi_aqi_wards_only():
+#     """
+#     Returns only ward boundaries with aggregated AQI (lighter response)
+#     """
+#     result = delhi_aqi()
+#     response_data = json.loads(result.body)
+    
+#     return JSONResponse(content={
+#         "wards": response_data["wards"],
+#         "summary": response_data["summary"]
+#     })
+
+
+# @app.get("/api/delhi-aqi/stations-only")
+# def delhi_aqi_stations_only():
+#     """
+#     Returns only station data (lightest response)
+#     """
+#     result = delhi_aqi()
+#     response_data = json.loads(result.body)
+    
+#     return JSONResponse(content={
+#         "stations": response_data["stations"],
+#         "summary": response_data["summary"]
+#     })
+
+def fetch_detailed_station_data(lat: float, lon: float) -> dict:
+    """
+    Fetch detailed pollutant data for a specific station
+    This includes PM2.5, PM10, NO2, SO2, O3, CO
+    """
+    url = f"https://api.waqi.info/feed/geo:{lat};{lon}/?token={WAQI_TOKEN}"
+    
+    try:
+        resp = requests.get(url, timeout=10)
+        data = resp.json()
+        
+        if data["status"] != "ok":
+            return {}
+        
+        station_data = data["data"]
+        iaqi = station_data.get("iaqi", {})
+        
+        # Extract pollutant values (these are sub-indices, not raw concentrations)
+        pollutants = {
+            "pm25": iaqi.get("pm25", {}).get("v"),
+            "pm10": iaqi.get("pm10", {}).get("v"),
+            "no2": iaqi.get("no2", {}).get("v"),
+            "so2": iaqi.get("so2", {}).get("v"),
+            "o3": iaqi.get("o3", {}).get("v"),
+            "co": iaqi.get("co", {}).get("v"),
+            "temperature": iaqi.get("t", {}).get("v"),
+            "humidity": iaqi.get("h", {}).get("v"),
+            "pressure": iaqi.get("p", {}).get("v"),
+            "wind_speed": iaqi.get("w", {}).get("v")
+        }
+        
+        # Get update time
+        time_info = station_data.get("time", {})
+        updated = time_info.get("s", "Unknown")
+        
+        return {
+            "pollutants": pollutants,
+            "updated": updated,
+            "dominentpol": station_data.get("dominentpol", "")
+        }
+        
+    except Exception as e:
+        print(f"Error fetching detailed data for {lat},{lon}: {e}")
+        return {}
 
 @app.get("/api/aqi/stations", response_model=AQIStationsResponse)
 async def get_aqi_stations_by_bounds(
@@ -1059,16 +1593,29 @@ async def get_ward_hourly_aqi(
         all_readings = []
         
         # Get today's data
-        today_readings = collector.get_hourly_data_from_redis(ward_no, today)
-        all_readings.extend(today_readings)
+        try:
+            today_readings = collector.get_hourly_data_from_redis(ward_no, today)
+            if today_readings and isinstance(today_readings, list):
+                all_readings.extend(today_readings)
+        except Exception as e:
+            logging.warning(f"Error fetching today's data for ward {ward_no}: {e}")
         
         # Get yesterday's data if needed
-        if hours > len(today_readings):
-            yesterday_readings = collector.get_hourly_data_from_redis(ward_no, yesterday)
-            all_readings.extend(yesterday_readings)
+        if hours > len(all_readings):
+            try:
+                yesterday_readings = collector.get_hourly_data_from_redis(ward_no, yesterday)
+                if yesterday_readings and isinstance(yesterday_readings, list):
+                    all_readings.extend(yesterday_readings)
+            except Exception as e:
+                logging.warning(f"Error fetching yesterday's data for ward {ward_no}: {e}")
         
-        # Sort by timestamp (oldest first)
-        all_readings.sort(key=lambda x: x.get("fetched_at", ""))
+        # Sort by timestamp (oldest first) - handle missing timestamps
+        def get_sort_key(x):
+            if not isinstance(x, dict):
+                return ""
+            return x.get("fetched_at") or x.get("timestamp") or x.get("time") or ""
+        
+        all_readings.sort(key=get_sort_key)
         
         # Get last N hours
         recent_readings = all_readings[-hours:] if len(all_readings) > hours else all_readings
@@ -1076,34 +1623,73 @@ async def get_ward_hourly_aqi(
         # Format for frontend
         formatted_data = []
         for reading in recent_readings:
-            fetched_at = reading.get("fetched_at", reading.get("timestamp", datetime.utcnow().isoformat()))
+            if not isinstance(reading, dict):
+                logging.warning(f"Skipping invalid reading format: {type(reading)}")
+                continue
+                
+            # Get timestamp - try multiple fields
+            fetched_at = reading.get("fetched_at") or reading.get("timestamp") or reading.get("time")
+            
+            # If no timestamp found, skip this reading
+            if not fetched_at:
+                logging.warning(f"Skipping reading without timestamp: {reading}")
+                continue
+            
+            # Ensure fetched_at is a string
+            if not isinstance(fetched_at, str):
+                fetched_at = str(fetched_at)
+            
             try:
                 # Parse datetime - handle different formats
+                dt = None
                 if 'Z' in fetched_at:
                     dt = datetime.fromisoformat(fetched_at.replace('Z', '+00:00'))
                 elif '+' in fetched_at or fetched_at.count('-') >= 3:
-                    dt = datetime.fromisoformat(fetched_at)
+                    try:
+                        dt = datetime.fromisoformat(fetched_at)
+                    except ValueError:
+                        # Try parsing as timestamp
+                        try:
+                            dt = datetime.fromtimestamp(float(fetched_at))
+                        except (ValueError, TypeError):
+                            logging.warning(f"Could not parse timestamp: {fetched_at}")
+                            continue
                 else:
                     # Fallback: try parsing as simple format
-                    dt = datetime.fromisoformat(fetched_at)
+                    try:
+                        dt = datetime.fromisoformat(fetched_at)
+                    except ValueError:
+                        logging.warning(f"Could not parse timestamp format: {fetched_at}")
+                        continue
                 
-                # Convert to IST (UTC+5:30)
-                ist_offset = timedelta(hours=5, minutes=30)
-                dt_ist = dt + ist_offset
+                if dt is None:
+                    continue
+                
+                # Convert to IST (UTC+5:30) if timezone-aware, otherwise assume UTC
+                if dt.tzinfo is None:
+                    # Assume UTC if no timezone info
+                    dt = dt.replace(tzinfo=None)
+                    ist_offset = timedelta(hours=5, minutes=30)
+                    dt_ist = dt + ist_offset
+                else:
+                    # Convert from UTC to IST
+                    ist_offset = timedelta(hours=5, minutes=30)
+                    dt_utc = dt.replace(tzinfo=None) if dt.tzinfo else dt
+                    dt_ist = dt_utc + ist_offset
                 
                 formatted_data.append({
                     "time": dt_ist.strftime("%H:00"),
                     "hour": dt_ist.hour,
                     "date": dt_ist.strftime("%Y-%m-%d"),
-                    "aqi": round(reading.get("aqi", 0), 1) if reading.get("aqi") else None,
-                    "pm25": round(reading.get("pm25", 0), 1) if reading.get("pm25") else None,
-                    "pm10": round(reading.get("pm10", 0), 1) if reading.get("pm10") else None,
-                    "no2": round(reading.get("no2", 0), 1) if reading.get("no2") else None,
-                    "o3": round(reading.get("o3", 0), 1) if reading.get("o3") else None,
+                    "aqi": round(reading.get("aqi", 0), 1) if reading.get("aqi") is not None else None,
+                    "pm25": round(reading.get("pm25", 0), 1) if reading.get("pm25") is not None else None,
+                    "pm10": round(reading.get("pm10", 0), 1) if reading.get("pm10") is not None else None,
+                    "no2": round(reading.get("no2", 0), 1) if reading.get("no2") is not None else None,
+                    "o3": round(reading.get("o3", 0), 1) if reading.get("o3") is not None else None,
                     "timestamp": fetched_at
                 })
             except Exception as e:
-                print(f"Error formatting reading: {e}")
+                logging.warning(f"Error formatting reading: {e}, reading: {reading}")
                 continue
         
         return {
@@ -1114,8 +1700,8 @@ async def get_ward_hourly_aqi(
         }
         
     except Exception as e:
-        print(f"Error getting hourly data: {e}")
-        traceback.print_exc()
+        logging.error(f"Error getting hourly data for ward {ward_no}: {e}")
+        logging.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error fetching hourly data: {str(e)}")
 
 @app.get("/api/aqi/scheduler/status")

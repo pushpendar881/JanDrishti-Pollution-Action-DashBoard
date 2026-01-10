@@ -8,6 +8,7 @@ import json
 import redis
 import requests
 import time
+import logging
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
@@ -15,6 +16,9 @@ from supabase import create_client, Client
 import threading
 
 load_dotenv()
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 # WAQI API Token
 WAQI_TOKEN = os.getenv("WAQI_API_TOKEN")
@@ -65,7 +69,9 @@ class AQICollector:
                         decode_responses=True,
                         ssl=REDIS_SSL,
                         ssl_cert_reqs=None if REDIS_SSL else False,
-                        socket_connect_timeout=5
+                        socket_connect_timeout=10,
+                        socket_keepalive=True,
+                        socket_keepalive_options={}
                     )
                     # Test connection
                     self.redis_client.ping()
@@ -81,7 +87,9 @@ class AQICollector:
                             password=REDIS_PASSWORD,
                             decode_responses=True,
                             ssl=False,
-                            socket_connect_timeout=5
+                            socket_connect_timeout=10,
+                            socket_keepalive=True,
+                            socket_keepalive_options={}
                         )
                         self.redis_client.ping()
                     else:
@@ -224,36 +232,117 @@ class AQICollector:
         if not aqi_data:
             return
         
+        # Ensure connection is alive before operation
+        self._ensure_redis_connection()
+        
         ward_no = ward["ward_no"]
         now = datetime.utcnow()
         date_str = now.strftime("%Y-%m-%d")
         hour = now.hour
         
-        # Store individual reading
-        key = f"aqi:hourly:{ward_no}:{date_str}:{hour}"
-        self.redis_client.setex(
-            key,
-            86400 * 2,  # Expire after 2 days
-            json.dumps(aqi_data)
-        )
-        
-        # Add to sorted set for the day (for easy retrieval)
-        day_key = f"aqi:hourly:{ward_no}:{date_str}"
-        score = now.timestamp()
-        self.redis_client.zadd(day_key, {json.dumps(aqi_data): score})
-        self.redis_client.expire(day_key, 86400 * 2)  # Expire after 2 days
-        
-        logger.info(f"✓ Stored hourly data for {ward['ward_name']} ({ward_no}) at {now.strftime('%Y-%m-%d %H:00')}")
+        try:
+            # Store individual reading
+            key = f"aqi:hourly:{ward_no}:{date_str}:{hour}"
+            self.redis_client.setex(
+                key,
+                86400 * 2,  # Expire after 2 days
+                json.dumps(aqi_data)
+            )
+            
+            # Add to sorted set for the day (for easy retrieval)
+            day_key = f"aqi:hourly:{ward_no}:{date_str}"
+            score = now.timestamp()
+            self.redis_client.zadd(day_key, {json.dumps(aqi_data): score})
+            self.redis_client.expire(day_key, 86400 * 2)  # Expire after 2 days
+            
+            logger.info(f"✓ Stored hourly data for {ward['ward_name']} ({ward_no}) at {now.strftime('%Y-%m-%d %H:00')}")
+        except (redis.ConnectionError, redis.TimeoutError, ConnectionResetError, OSError) as e:
+            logger.warning(f"Redis write error, attempting reconnect: {e}")
+            # Try to reconnect and retry once
+            self._ensure_redis_connection()
+            try:
+                key = f"aqi:hourly:{ward_no}:{date_str}:{hour}"
+                self.redis_client.setex(
+                    key,
+                    86400 * 2,
+                    json.dumps(aqi_data)
+                )
+                day_key = f"aqi:hourly:{ward_no}:{date_str}"
+                score = now.timestamp()
+                self.redis_client.zadd(day_key, {json.dumps(aqi_data): score})
+                self.redis_client.expire(day_key, 86400 * 2)
+                logger.info(f"✓ Stored hourly data for {ward['ward_name']} ({ward_no}) after reconnect")
+            except Exception as retry_error:
+                logger.error(f"Failed to write to Redis after reconnect: {retry_error}")
+                raise
+    
+    def _ensure_redis_connection(self, max_retries=3):
+        """Ensure Redis connection is alive, reconnect if needed"""
+        for attempt in range(max_retries):
+            try:
+                self.redis_client.ping()
+                return True
+            except (redis.ConnectionError, redis.TimeoutError, ConnectionResetError, OSError) as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Redis connection lost (attempt {attempt + 1}/{max_retries}), reconnecting...")
+                    time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                    try:
+                        # Reconnect
+                        if REDIS_URL:
+                            use_ssl = REDIS_URL.startswith('rediss://') or REDIS_SSL
+                            self.redis_client = redis.from_url(
+                                REDIS_URL,
+                                decode_responses=True,
+                                ssl=use_ssl,
+                                ssl_cert_reqs=None if use_ssl else False,
+                                socket_connect_timeout=10,
+                                socket_keepalive=True,
+                                socket_keepalive_options={}
+                            )
+                        else:
+                            self.redis_client = redis.Redis(
+                                host=REDIS_HOST,
+                                port=REDIS_PORT,
+                                db=REDIS_DB,
+                                username=REDIS_USERNAME if REDIS_PASSWORD else None,
+                                password=REDIS_PASSWORD,
+                                decode_responses=True,
+                                ssl=REDIS_SSL,
+                                ssl_cert_reqs=None if REDIS_SSL else False,
+                                socket_connect_timeout=10,
+                                socket_keepalive=True,
+                                socket_keepalive_options={}
+                            )
+                    except Exception as reconnect_error:
+                        logger.error(f"Failed to reconnect to Redis: {reconnect_error}")
+                        if attempt == max_retries - 1:
+                            raise
+                else:
+                    raise ConnectionError(f"Redis connection failed after {max_retries} attempts: {e}")
+        return False
     
     def get_hourly_data_from_redis(self, ward_no: str, target_date: date) -> List[Dict]:
         """
         Get all hourly readings for a ward on a specific date from Redis
         """
+        # Ensure connection is alive before operation
+        self._ensure_redis_connection()
+        
         date_str = target_date.strftime("%Y-%m-%d")
         day_key = f"aqi:hourly:{ward_no}:{date_str}"
         
-        # Get all readings for the day
-        readings = self.redis_client.zrange(day_key, 0, -1)
+        try:
+            # Get all readings for the day
+            readings = self.redis_client.zrange(day_key, 0, -1)
+        except (redis.ConnectionError, redis.TimeoutError, ConnectionResetError, OSError) as e:
+            logger.warning(f"Redis read error, attempting reconnect: {e}")
+            # Try to reconnect and retry once
+            self._ensure_redis_connection()
+            try:
+                readings = self.redis_client.zrange(day_key, 0, -1)
+            except Exception as retry_error:
+                logger.error(f"Failed to read from Redis after reconnect: {retry_error}")
+                return []  # Return empty list instead of crashing
         
         result = []
         for reading_json in readings:

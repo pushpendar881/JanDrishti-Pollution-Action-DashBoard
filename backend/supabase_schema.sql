@@ -68,3 +68,28 @@ CREATE POLICY "Service role can insert AQI data" ON ward_aqi_daily
 
 CREATE POLICY "Service role can update AQI data" ON ward_aqi_daily
     FOR UPDATE USING (true);
+
+-- Table to cache AQI station data (used by edge function)
+CREATE TABLE IF NOT EXISTS aqi_cache (
+    id BIGSERIAL PRIMARY KEY,
+    data JSONB NOT NULL,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Create index on generated_at for faster queries
+CREATE INDEX IF NOT EXISTS idx_aqi_cache_generated_at ON aqi_cache(generated_at DESC);
+
+-- Enable RLS (Row Level Security)
+ALTER TABLE aqi_cache ENABLE ROW LEVEL SECURITY;
+
+-- Policy: Allow public read access
+-- Drop policy if it exists, then create it
+DROP POLICY IF EXISTS "Allow public read access" ON aqi_cache;
+CREATE POLICY "Allow public read access" ON aqi_cache
+    FOR SELECT
+    USING (true);
+
+-- Grant permissions
+GRANT SELECT ON aqi_cache TO anon, authenticated;
+GRANT ALL ON aqi_cache TO service_role;

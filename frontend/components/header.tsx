@@ -70,12 +70,12 @@ export default function Header({ selectedWard, setSelectedWard }: HeaderProps) {
 
   return (
     <header
-      className={`sticky top-0 z-50 bg-background/95 backdrop-blur-sm border-b border-border ${isScrolled
-        ? "py-3"
-        : "py-4"
+      className={`sticky top-0 z-50 bg-background border-b border-border/50 shadow-sm transition-all h-[73px] flex items-center ${isScrolled
+        ? "shadow-md"
+        : ""
         }`}
     >
-      <div className="container-px flex items-center justify-between">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
         <div className="flex items-center gap-12">
           {/* Logo */}
           <div className="flex items-center gap-3">
@@ -94,12 +94,12 @@ export default function Header({ selectedWard, setSelectedWard }: HeaderProps) {
 
         <div className="flex items-center gap-4">
           {/* Ward Selector */}
-          <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-background">
+          <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg border border-border/50 bg-muted/30 hover:bg-muted/50 transition-colors">
             <Building2 size={16} className="text-muted-foreground" />
             <select
               value={selectedWard}
               onChange={(e) => setSelectedWard(e.target.value)}
-              className="bg-transparent text-sm font-medium text-foreground outline-none cursor-pointer border-none"
+              className="bg-transparent text-sm font-medium text-foreground outline-none cursor-pointer border-none appearance-none"
             >
               {wardOptions.map((ward) => (
                 <option key={ward.id} value={ward.id}>
@@ -117,7 +117,7 @@ export default function Header({ selectedWard, setSelectedWard }: HeaderProps) {
             {isAuthenticated && user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors">
+                  <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/50 bg-muted/30 hover:bg-muted/50 transition-colors">
                     <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-sm font-medium">
                       {user.email?.charAt(0).toUpperCase() || "U"}
                     </div>

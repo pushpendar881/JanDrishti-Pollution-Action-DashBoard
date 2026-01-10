@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import Header from "@/components/header"
 import MainMetrics from "@/components/main-metrics"
 import PollutantFilters from "@/components/pollutant-filters"
-import PollutionMap from "@/components/pollution-map"
+import DelhiAQIMap from "@/components/delhiaqimap"
 import PollutionChart from "@/components/pollution-chart"
 import PollutantHealth from "@/components/pollutant-health"
 import AQIReference from "@/components/aqi-reference"
@@ -65,7 +65,9 @@ export default function Dashboard() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2">
-                <PollutionMap selectedPollutant={selectedPollutant} />
+                <div className="rounded-[2rem] glass-morphism border border-white/5 overflow-hidden h-[550px]">
+                  <DelhiAQIMap />
+                </div>
               </div>
               <div className="lg:col-span-1">
                 <AlertsPanel />
@@ -123,7 +125,7 @@ export default function Dashboard() {
           </div>
 
           {/* Navigation Tabs */}
-          <div className="sticky top-20 z-20 mb-8 border-b border-border">
+          <div className="sticky top-[73px] z-20 mb-8 border-b border-border bg-background/95 backdrop-blur-sm">
             <div className="flex gap-1 overflow-x-auto">
               {tabs.map((tab) => (
                 <button
