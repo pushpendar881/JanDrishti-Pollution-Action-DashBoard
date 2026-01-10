@@ -7,8 +7,8 @@ import MainMetrics from "@/components/main-metrics"
 import PollutantFilters from "@/components/pollutant-filters"
 import PollutionMap from "@/components/pollution-map"
 import PollutionChart from "@/components/pollution-chart"
-import WeatherCard from "@/components/weather-card"
-import StatsGrid from "@/components/stats-grid"
+import PollutantHealth from "@/components/pollutant-health"
+import AQIReference from "@/components/aqi-reference"
 import NewsSection from "@/components/news-section"
 import CitizenReporting from "@/components/citizen-reporting"
 import AIForecast from "@/components/ai-forecast"
@@ -20,8 +20,7 @@ import { LayoutDashboard, Activity, Zap, Users, ShieldAlert, History, ArrowRight
 
 export default function Dashboard() {
   const [selectedPollutant, setSelectedPollutant] = useState<string>("aqi")
-  const [selectedCity, setSelectedCity] = useState<string>("new-delhi")
-  const [selectedWard, setSelectedWard] = useState<string>("ward-1")
+  const [selectedWard, setSelectedWard] = useState<string>("")
   const [activeTab, setActiveTab] = useState<string>("overview")
   const [isScrolled, setIsScrolled] = useState(false)
 
@@ -40,18 +39,7 @@ export default function Dashboard() {
     { id: "no2", label: "NO2", color: "#a78bfa" },
   ]
 
-  const aqiData = {
-    value: 206,
-    status: "Severe",
-    statusColor: "text-red-500",
-    statusBg: "bg-red-500/10",
-    pm25: 130,
-    pm10: 180,
-    temperature: 13,
-    humidity: 77,
-    windSpeed: 7,
-    uvIndex: 0,
-  }
+  // Removed hardcoded aqiData - now fetched dynamically in MainMetrics component
 
   const tabs = [
     { id: "overview", label: "Overview", icon: <LayoutDashboard size={18} /> },
@@ -91,7 +79,7 @@ export default function Dashboard() {
         return (
           <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-8">
             <motion.div variants={itemVariants}>
-              <MainMetrics aqiData={aqiData} selectedWard={selectedWard} />
+              <MainMetrics selectedWard={selectedWard} />
             </motion.div>
 
             <motion.div variants={itemVariants}>
@@ -112,8 +100,8 @@ export default function Dashboard() {
             </motion.div>
 
             <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <WeatherCard aqiData={aqiData} />
-              <StatsGrid aqiData={aqiData} />
+              <PollutantHealth selectedWard={selectedWard} />
+              <AQIReference selectedWard={selectedWard} />
             </motion.div>
           </motion.div>
         )
@@ -125,7 +113,7 @@ export default function Dashboard() {
             className="grid grid-cols-1 xl:grid-cols-4 gap-8"
           >
             <div className="xl:col-span-3">
-              <PollutionChart selectedPollutant={selectedPollutant} />
+              <PollutionChart selectedPollutant={selectedPollutant} selectedWard={selectedWard} />
             </div>
             <div className="xl:col-span-1">
               <NewsSection />
@@ -133,11 +121,11 @@ export default function Dashboard() {
           </motion.div>
         )
       case "forecast":
-        return <AIForecast selectedCity={selectedCity} selectedWard={selectedWard} />
+        return <AIForecast selectedWard={selectedWard} />
       case "reports":
         return <CitizenReporting selectedWard={selectedWard} />
       case "policy":
-        return <PolicyRecommendations aqiData={aqiData} />
+        return <PolicyRecommendations aqiData={{ value: 0, status: "Loading", statusColor: "text-primary", statusBg: "bg-primary/10", pm25: 0, pm10: 0, temperature: 0, humidity: 0, windSpeed: 0, uvIndex: 0 }} />
       case "history":
         return <HistoricalAnalysis selectedPollutant={selectedPollutant} />
       default:
@@ -162,8 +150,6 @@ export default function Dashboard() {
 
       <div className="relative z-10 flex flex-col min-h-screen">
         <Header 
-          selectedCity={selectedCity} 
-          setSelectedCity={setSelectedCity}
           selectedWard={selectedWard}
           setSelectedWard={setSelectedWard}
         />

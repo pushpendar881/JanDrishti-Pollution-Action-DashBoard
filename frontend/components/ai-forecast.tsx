@@ -4,11 +4,10 @@ import { useState } from "react"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from "recharts"
 
 interface AIForecastProps {
-  selectedCity: string
   selectedWard: string
 }
 
-export default function AIForecast({ selectedCity, selectedWard }: AIForecastProps) {
+export default function AIForecast({ selectedWard }: AIForecastProps) {
   const [forecastPeriod, setForecastPeriod] = useState<string>("24h")
   const [selectedMetric, setSelectedMetric] = useState<string>("aqi")
 

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import os
 import traceback
 import requests
@@ -15,6 +15,7 @@ from jose import JWTError, jwt
 from groq import Groq
 from aqi_scheduler import get_scheduler
 from chat_cache import get_chat_cache
+from aqi_collector import AQICollector
 
 
 load_dotenv()
@@ -179,8 +180,96 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         )
 
 # AI Helper Functions
+async def fetch_aqi_data_for_ward(ward_name: str = None, ward_no: str = None) -> dict:
+    """Fetch current AQI data for a specific ward from Redis or API"""
+    try:
+        collector = AQICollector()
+        
+        # If ward_name provided, find ward_no
+        if ward_name and not ward_no:
+            wards = collector.selected_wards
+            ward = next((w for w in wards if ward_name.upper() in w.get("ward_name", "").upper()), None)
+            if ward:
+                ward_no = ward.get("ward_no")
+        
+        if not ward_no:
+            return None
+        
+        # Try to get latest hourly data from Redis
+        today = date.today()
+        hourly_data = collector.get_hourly_data_from_redis(ward_no, today)
+        
+        if hourly_data and len(hourly_data) > 0:
+            latest = hourly_data[-1]
+            return {
+                "ward_no": ward_no,
+                "ward_name": next((w.get("ward_name") for w in collector.selected_wards if w.get("ward_no") == ward_no), "Unknown"),
+                "aqi": latest.get("aqi"),
+                "pm25": latest.get("pm25"),
+                "pm10": latest.get("pm10"),
+                "no2": latest.get("no2"),
+                "o3": latest.get("o3"),
+                "timestamp": latest.get("fetched_at", latest.get("timestamp")),
+                "source": "Redis (hourly data)"
+            }
+        
+        # Fallback to feed API
+        ward = next((w for w in collector.selected_wards if w.get("ward_no") == ward_no), None)
+        if ward:
+            aqi_data = collector.fetch_aqi_for_ward(ward.get("latitude"), ward.get("longitude"))
+            if aqi_data:
+                return {
+                    "ward_no": ward_no,
+                    "ward_name": ward.get("ward_name"),
+                    "aqi": aqi_data.get("aqi"),
+                    "pm25": aqi_data.get("pm25"),
+                    "pm10": aqi_data.get("pm10"),
+                    "no2": aqi_data.get("no2"),
+                    "o3": aqi_data.get("o3"),
+                    "timestamp": aqi_data.get("fetched_at"),
+                    "source": "WAQI API (real-time)"
+                }
+        
+        return None
+    except Exception as e:
+        print(f"Error fetching AQI data: {e}")
+        return None
+
+async def detect_ward_from_message(message: str) -> tuple:
+    """Detect ward name or number from user message"""
+    message_lower = message.lower()
+    
+    # Ward names mapping
+    ward_names = {
+        "model town": "72",
+        "begumpur": "27",
+        "hauz rani": "162",
+        "nangli sakravati": "134",
+        "nangli": "134",
+        "sakravati": "134"
+    }
+    
+    # Check for ward names
+    for ward_name, ward_no in ward_names.items():
+        if ward_name in message_lower:
+            return ward_name.title(), ward_no
+    
+    # Check for ward numbers
+    import re
+    ward_no_match = re.search(r'ward\s*[:\-]?\s*(\d+)', message_lower)
+    if ward_no_match:
+        ward_no = ward_no_match.group(1)
+        try:
+            collector = AQICollector()
+            ward_name = next((w.get("ward_name") for w in collector.selected_wards if w.get("ward_no") == ward_no), None)
+            return ward_name or f"Ward {ward_no}", ward_no
+        except:
+            return f"Ward {ward_no}", ward_no
+    
+    return None, None
+
 async def generate_ai_response(user_message: str, user_id: str = None, user_context: dict = None) -> str:
-    """Generate AI response using Groq API with conversation context from Redis"""
+    """Generate AI response using Groq API with conversation context from Redis and real-time AQI data"""
     try:
         chat_cache = get_chat_cache()
         
@@ -188,6 +277,52 @@ async def generate_ai_response(user_message: str, user_id: str = None, user_cont
         conversation_context = []
         if user_id:
             conversation_context = chat_cache.get_conversation_context(user_id, max_messages=5)
+        
+        # Detect if user is asking about AQI/ward and fetch real data
+        aqi_context = ""
+        message_lower = user_message.lower()
+        is_aqi_question = any(keyword in message_lower for keyword in [
+            "aqi", "air quality", "pollution", "pm25", "pm10", "no2", "o3", 
+            "ward", "model town", "begumpur", "hauz rani", "nangli sakravati"
+        ])
+        
+        if is_aqi_question:
+            ward_name, ward_no = await detect_ward_from_message(user_message)
+            
+            if ward_no:
+                aqi_data = await fetch_aqi_data_for_ward(ward_name, ward_no)
+                if aqi_data:
+                    aqi_context = f"""
+REAL-TIME AQI DATA FOR {aqi_data.get('ward_name', 'WARD')} (Ward {aqi_data.get('ward_no')}):
+- Current AQI: {aqi_data.get('aqi', 'N/A')}
+- PM2.5: {aqi_data.get('pm25', 'N/A')} µg/m³
+- PM10: {aqi_data.get('pm10', 'N/A')} µg/m³
+- NO2: {aqi_data.get('no2', 'N/A')} µg/m³
+- O3: {aqi_data.get('o3', 'N/A')} µg/m³
+- Last Updated: {aqi_data.get('timestamp', 'Unknown')}
+- Data Source: {aqi_data.get('source', 'Unknown')}
+
+Use this REAL data to answer the user's question. Do NOT say you don't have access to real-time data.
+"""
+            else:
+                # Fetch data for all wards if no specific ward mentioned
+                try:
+                    collector = AQICollector()
+                    all_wards_data = []
+                    for ward in collector.selected_wards[:4]:  # Limit to 4 wards
+                        ward_data = await fetch_aqi_data_for_ward(None, ward.get("ward_no"))
+                        if ward_data:
+                            all_wards_data.append(ward_data)
+                    
+                    if all_wards_data:
+                        aqi_context = "\nREAL-TIME AQI DATA FOR ALL MONITORED WARDS:\n"
+                        for ward_data in all_wards_data:
+                            aqi_context += f"""
+- {ward_data.get('ward_name')} (Ward {ward_data.get('ward_no')}): AQI {ward_data.get('aqi', 'N/A')} | PM2.5: {ward_data.get('pm25', 'N/A')} | PM10: {ward_data.get('pm10', 'N/A')} | NO2: {ward_data.get('no2', 'N/A')} | O3: {ward_data.get('o3', 'N/A')} µg/m³
+"""
+                        aqi_context += "\nUse this REAL data to answer the user's question. Do NOT say you don't have access to real-time data.\n"
+                except Exception as e:
+                    print(f"Error fetching all wards data: {e}")
         
         # Create a context-aware system prompt for pollution monitoring
         system_prompt = """You are an AI assistant for JanDrishti, a pollution monitoring and environmental intelligence platform. 
@@ -202,7 +337,9 @@ async def generate_ai_response(user_message: str, user_id: str = None, user_cont
         - Emergency contacts and helplines
         - Environmental health tips
         
-        Always provide accurate, helpful, and actionable information. If you don't have specific real-time data, acknowledge this and provide general guidance.
+        IMPORTANT: When you have real-time AQI data provided in the context, USE IT to answer questions accurately. 
+        Do NOT say you don't have access to real-time data if it's provided below.
+        Always provide accurate, helpful, and actionable information based on the data available.
         Keep responses concise but informative, and always prioritize user health and safety."""
         
         # Add user context if available
@@ -211,7 +348,7 @@ async def generate_ai_response(user_message: str, user_id: str = None, user_cont
             context_info = f"\nUser context: {user_context.get('location', 'Unknown location')}"
         
         # Build messages array with conversation history
-        messages = [{"role": "system", "content": system_prompt + context_info}]
+        messages = [{"role": "system", "content": system_prompt + context_info + aqi_context}]
         
         # Add conversation context from Redis
         for msg in conversation_context:
@@ -862,7 +999,6 @@ async def get_ward_daily_aqi(
 ):
     """Get daily AQI data for a specific ward"""
     try:
-        from datetime import timedelta
         start_date = (date.today() - timedelta(days=days)).isoformat()
         
         response = supabase.table("ward_aqi_daily")\
@@ -875,6 +1011,87 @@ async def get_ward_daily_aqi(
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/aqi/hourly/{ward_no}")
+async def get_ward_hourly_aqi(
+    ward_no: str,
+    hours: int = Query(24, description="Number of hours to retrieve (max 48)")
+):
+    """
+    Get hourly AQI data for a specific ward from Redis
+    Returns hourly readings for the last N hours
+    """
+    try:
+        collector = AQICollector()
+        
+        # Limit to max 48 hours
+        hours = min(hours, 48)
+        
+        # Get data for today and yesterday if needed
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        
+        all_readings = []
+        
+        # Get today's data
+        today_readings = collector.get_hourly_data_from_redis(ward_no, today)
+        all_readings.extend(today_readings)
+        
+        # Get yesterday's data if needed
+        if hours > len(today_readings):
+            yesterday_readings = collector.get_hourly_data_from_redis(ward_no, yesterday)
+            all_readings.extend(yesterday_readings)
+        
+        # Sort by timestamp (oldest first)
+        all_readings.sort(key=lambda x: x.get("fetched_at", ""))
+        
+        # Get last N hours
+        recent_readings = all_readings[-hours:] if len(all_readings) > hours else all_readings
+        
+        # Format for frontend
+        formatted_data = []
+        for reading in recent_readings:
+            fetched_at = reading.get("fetched_at", reading.get("timestamp", datetime.utcnow().isoformat()))
+            try:
+                # Parse datetime - handle different formats
+                if 'Z' in fetched_at:
+                    dt = datetime.fromisoformat(fetched_at.replace('Z', '+00:00'))
+                elif '+' in fetched_at or fetched_at.count('-') >= 3:
+                    dt = datetime.fromisoformat(fetched_at)
+                else:
+                    # Fallback: try parsing as simple format
+                    dt = datetime.fromisoformat(fetched_at)
+                
+                # Convert to IST (UTC+5:30)
+                ist_offset = timedelta(hours=5, minutes=30)
+                dt_ist = dt + ist_offset
+                
+                formatted_data.append({
+                    "time": dt_ist.strftime("%H:00"),
+                    "hour": dt_ist.hour,
+                    "date": dt_ist.strftime("%Y-%m-%d"),
+                    "aqi": round(reading.get("aqi", 0), 1) if reading.get("aqi") else None,
+                    "pm25": round(reading.get("pm25", 0), 1) if reading.get("pm25") else None,
+                    "pm10": round(reading.get("pm10", 0), 1) if reading.get("pm10") else None,
+                    "no2": round(reading.get("no2", 0), 1) if reading.get("no2") else None,
+                    "o3": round(reading.get("o3", 0), 1) if reading.get("o3") else None,
+                    "timestamp": fetched_at
+                })
+            except Exception as e:
+                print(f"Error formatting reading: {e}")
+                continue
+        
+        return {
+            "ward_no": ward_no,
+            "readings": formatted_data,
+            "total_readings": len(formatted_data),
+            "hours_requested": hours
+        }
+        
+    except Exception as e:
+        print(f"Error getting hourly data: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error fetching hourly data: {str(e)}")
 
 @app.get("/api/aqi/scheduler/status")
 async def get_scheduler_status():

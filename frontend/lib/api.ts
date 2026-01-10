@@ -262,6 +262,105 @@ export const aqiService = {
     }
   },
 
+  async getWardHourlyData(ward_no: string, hours: number = 24): Promise<{
+    ward_no: string
+    readings: Array<{
+      time: string
+      hour: number
+      date: string
+      aqi: number | null
+      pm25: number | null
+      pm10: number | null
+      no2: number | null
+      o3: number | null
+      timestamp: string
+    }>
+    total_readings: number
+    hours_requested: number
+  }> {
+    try {
+      const response = await api.get(`/api/aqi/hourly/${ward_no}`, {
+        params: { hours }
+      })
+      return response.data
+    } catch (error) {
+      console.error('Error fetching ward hourly data:', error)
+      throw error
+    }
+  },
+
+  async getCurrentAQIForWard(ward_no: string): Promise<{
+    aqi: number
+    pm25: number | null
+    pm10: number | null
+    no2: number | null
+    o3: number | null
+    timestamp: string
+  }> {
+    // Get ward coordinates first
+    let ward: WardData | undefined
+    try {
+      const wards = await aqiService.getWards()
+      ward = wards.find(w => w.ward_no === ward_no)
+    } catch (error) {
+      console.error('Error fetching wards:', error)
+      throw new Error('Failed to load ward information. Please refresh the page.')
+    }
+
+    if (!ward) {
+      throw new Error(`Ward ${ward_no} not found in the system`)
+    }
+
+    // Try hourly data from Redis first (fastest if available)
+    let hourlyDataAvailable = false
+    try {
+      const hourlyResponse = await api.get(`/api/aqi/hourly/${ward_no}`, {
+        params: { hours: 1 }
+      })
+      
+      if (hourlyResponse.data?.readings && hourlyResponse.data.readings.length > 0) {
+        const latest = hourlyResponse.data.readings[hourlyResponse.data.readings.length - 1]
+        if (latest.aqi && latest.aqi > 0) {
+          hourlyDataAvailable = true
+          return {
+            aqi: latest.aqi,
+            pm25: latest.pm25 ?? null,
+            pm10: latest.pm10 ?? null,
+            no2: latest.no2 ?? null,
+            o3: latest.o3 ?? null,
+            timestamp: latest.timestamp
+          }
+        }
+      }
+    } catch (error: any) {
+      // Log but don't throw - we'll try feed endpoint
+      console.log('Hourly data not available in Redis:', error.response?.data?.detail || error.message)
+    }
+    
+    // Fallback to feed endpoint (always works if WAQI API is available)
+    // This is the primary source for real-time data
+    try {
+      const feedResponse = await api.get(`/api/aqi/feed/${ward.latitude}/${ward.longitude}`)
+      
+      if (feedResponse.data && feedResponse.data.aqi !== undefined && feedResponse.data.aqi !== null) {
+        return {
+          aqi: feedResponse.data.aqi,
+          pm25: feedResponse.data.pm25 ?? null,
+          pm10: feedResponse.data.pm10 ?? null,
+          no2: feedResponse.data.no2 ?? null,
+          o3: feedResponse.data.o3 ?? null,
+          timestamp: feedResponse.data.updated || new Date().toISOString()
+        }
+      } else {
+        throw new Error('AQI data not available for this location')
+      }
+    } catch (error: any) {
+      console.error('Error fetching from feed endpoint:', error)
+      const errorMessage = error.response?.data?.detail || error.message || 'Unknown error'
+      throw new Error(`Unable to fetch AQI data: ${errorMessage}. Please ensure the backend server is running and the WAQI API is accessible.`)
+    }
+  },
+
   async getHistoricalData(location: string, days: number = 7) {
     // Mock historical data - replace with real API
     const data = []

@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react"
 import { motion } from "framer-motion"
-import { MapPin, Building2, Bell, Menu, User } from "lucide-react"
+import { Building2, Bell, Menu, User } from "lucide-react"
 import { ModeToggle } from "./mode-toggle"
 import { useAuth } from "@/context/auth-context"
 import AuthDialog from "@/components/auth-dialog"
+import { aqiService, type WardData } from "@/lib/api"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,16 +17,16 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 interface HeaderProps {
-  selectedCity: string
-  setSelectedCity: (city: string) => void
   selectedWard: string
   setSelectedWard: (ward: string) => void
 }
 
-export default function Header({ selectedCity, setSelectedCity, selectedWard, setSelectedWard }: HeaderProps) {
+export default function Header({ selectedWard, setSelectedWard }: HeaderProps) {
   const [isScrolled, setIsScrolled] = useState(false)
   const { isAuthenticated, user, logout } = useAuth()
   const [showAuthDialog, setShowAuthDialog] = useState(false)
+  const [wards, setWards] = useState<WardData[]>([])
+  const [loadingWards, setLoadingWards] = useState(true)
 
   useEffect(() => {
     const handleScroll = () => setIsScrolled(window.scrollY > 20)
@@ -33,21 +34,40 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
     return () => window.removeEventListener("scroll", handleScroll)
   }, [])
 
-  const cities = [
-    { id: "new-delhi", name: "New Delhi", emoji: "📍" },
-    { id: "mumbai", name: "Mumbai", emoji: "📍" },
-    { id: "bangalore", name: "Bangalore", emoji: "📍" },
-  ]
+  // Fetch wards from API
+  useEffect(() => {
+    const fetchWards = async () => {
+      try {
+        const wardsData = await aqiService.getWards()
+        setWards(wardsData)
+        
+        // Set default ward if not set
+        if (!selectedWard && wardsData.length > 0) {
+          setSelectedWard(`ward-${wardsData[0].ward_no}`)
+        }
+      } catch (error) {
+        console.error("Error fetching wards:", error)
+        // Fallback to default wards
+        setWards([
+          { ward_name: "MODEL TOWN", ward_no: "72", quadrant: "NE", latitude: 28.701933, longitude: 77.191341 },
+          { ward_name: "BEGUMPUR", ward_no: "27", quadrant: "NW", latitude: 28.765128, longitude: 77.022542 },
+          { ward_name: "HAUZ RANI", ward_no: "162", quadrant: "SE", latitude: 28.533246, longitude: 77.212759 },
+          { ward_name: "NANGLI SAKRAVATI", ward_no: "134", quadrant: "SW", latitude: 28.580401, longitude: 76.994073 },
+        ])
+      } finally {
+        setLoadingWards(false)
+      }
+    }
+    
+    fetchWards()
+  }, [])
 
-  const wards = [
-    { id: "ward-1", name: "Ward 1 - Central Delhi", city: "new-delhi" },
-    { id: "ward-2", name: "Ward 2 - South Delhi", city: "new-delhi" },
-    { id: "ward-3", name: "Ward 3 - North Delhi", city: "new-delhi" },
-    { id: "ward-4", name: "Ward 4 - East Delhi", city: "new-delhi" },
-    { id: "ward-5", name: "Ward 5 - West Delhi", city: "new-delhi" },
-  ]
-
-  const filteredWards = wards.filter(ward => ward.city === selectedCity)
+  // Map wards to dropdown format
+  const wardOptions = wards.map((ward, index) => ({
+    id: `ward-${ward.ward_no}`,
+    name: `${ward.ward_name} (${ward.ward_no}) - ${ward.quadrant}`,
+    ward_no: ward.ward_no
+  }))
 
   return (
     <header
@@ -79,41 +99,11 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
             </div>
           </motion.div>
 
-          {/* Navigation */}
-          <nav className="hidden lg:flex items-center gap-8">
-            {["Insights", "Network", "Policy", "Forecast"].map((item) => (
-              <a
-                key={item}
-                href="#"
-                className="text-sm font-semibold text-muted-foreground hover:text-primary transition-colors relative group"
-              >
-                {item}
-                <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary transition-all duration-300 group-hover:w-full" />
-              </a>
-            ))}
-          </nav>
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Locality Selectors */}
+          {/* Ward Selector */}
           <div className="hidden md:flex items-center gap-2 p-1 rounded-2xl bg-muted/30 border backdrop-blur-md">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/50 transition-colors group cursor-pointer">
-              <MapPin size={14} className="text-primary group-hover:animate-bounce" />
-              <select
-                value={selectedCity}
-                onChange={(e) => setSelectedCity(e.target.value)}
-                className="bg-transparent text-sm font-bold text-foreground outline-none cursor-pointer"
-              >
-                {cities.map((city) => (
-                  <option key={city.id} value={city.id} className="bg-background">
-                    {city.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="w-px h-4 bg-border" />
-
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-muted/50 transition-colors group cursor-pointer">
               <Building2 size={14} className="text-accent group-hover:animate-bounce" />
               <select
@@ -121,7 +111,7 @@ export default function Header({ selectedCity, setSelectedCity, selectedWard, se
                 onChange={(e) => setSelectedWard(e.target.value)}
                 className="bg-transparent text-sm font-bold text-foreground outline-none cursor-pointer"
               >
-                {filteredWards.map((ward) => (
+                {wardOptions.map((ward) => (
                   <option key={ward.id} value={ward.id} className="bg-background">
                     {ward.name}
                   </option>
